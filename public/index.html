@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>방핑 단어게임</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="page">
+    <section class="card">
+      <div class="hero">
+        <span class="badge">TEAM. BANG PING</span>
+        <h1 style="margin-top:14px;">한글 자모 단어게임</h1>
+        <p class="sub">운영자가 문제를 시작하면 자동으로 화면이 바뀌어.</p>
+      </div>
+
+      <section id="joinView" class="stack">
+        <input id="nicknameInput" maxlength="20" placeholder="닉네임을 입력해줘">
+        <button id="joinBtn" class="primary">게임 참가</button>
+        <div id="joinStatus" class="status"></div>
+      </section>
+
+      <section id="waitingView" class="hidden">
+        <div class="hero">
+          <h2>대기 중...</h2>
+          <p class="sub">운영자가 문제를 시작하면 자동으로 넘어가.</p>
+          <div id="waitingMeta" class="status"></div>
+        </div>
+      </section>
+
+      <section id="gameView" class="hidden stack">
+        <div class="hero">
+          <span id="questionBadge" class="badge">문제</span>
+          <h2 id="gameTitle" style="margin-top:14px;">단어를 맞혀봐!</h2>
+          <div id="gameMeta" class="sub"></div>
+        </div>
+
+        <div id="hintBox" class="answer-box hidden"></div>
+        <div id="board" class="board"></div>
+
+        <div class="row">
+          <input id="guessInput" placeholder="한글 단어 입력" autocomplete="off">
+          <button id="guessBtn" class="primary">입력</button>
+        </div>
+        <div id="gameStatus" class="status"></div>
+      </section>
+
+      <section id="winnerView" class="hidden">
+        <div class="hero">
+          <h2>정답!! 🎉</h2>
+          <div id="rankText" class="big-rank"></div>
+          <p id="winnerDetail" class="sub"></p>
+          <p class="sub">다음 문제를 기다려줘.</p>
+        </div>
+      </section>
+
+      <section id="revealView" class="hidden">
+        <div class="hero">
+          <h2>정답 공개</h2>
+          <div id="revealedAnswer" class="answer-box"></div>
+          <p class="sub" style="margin-top:14px;">다음 문제를 기다려줘.</p>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/game.js"></script>
+</body>
+</html>

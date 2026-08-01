@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>방핑 단어게임 운영자</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="page">
+    <section class="card stack">
+      <div class="hero">
+        <span class="badge">ADMIN CONTROL</span>
+        <h1 style="margin-top:14px;">방핑 단어게임 운영자</h1>
+        <p class="sub">문제 시작, 힌트, 정답 공개, 다음 문제를 여기서 조작해.</p>
+      </div>
+
+      <section id="loginView" class="stack">
+        <input id="adminKeyInput" type="password" placeholder="운영자 키">
+        <button id="adminLoginBtn" class="primary">운영자 접속</button>
+        <div id="adminLoginStatus" class="status"></div>
+      </section>
+
+      <section id="controlView" class="hidden stack">
+        <div class="grid-2">
+          <div class="stat">현재 참가자<strong id="participantCount">0명</strong></div>
+          <div class="stat">현재 정답자<strong id="winnerCount">0명</strong></div>
+        </div>
+
+        <div class="stat">
+          <div class="sub">현재 문제</div>
+          <strong id="questionNumber">문제 없음</strong>
+          <div style="margin-top:12px;">정답: <b id="adminAnswer">-</b></div>
+          <div style="margin-top:6px;">힌트: <b id="adminHint">-</b></div>
+        </div>
+
+        <div class="row">
+          <button id="startBtn" class="primary">문제 시작</button>
+          <button id="hintBtn">힌트 공개</button>
+          <button id="revealBtn" class="danger">정답 공개</button>
+          <button id="nextBtn">다음 문제</button>
+        </div>
+
+        <div id="adminStatus" class="status"></div>
+
+        <section>
+          <h2>실시간 정답 순위</h2>
+          <div id="winnerList" class="winners"></div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/admin.js"></script>
+</body>
+</html>
