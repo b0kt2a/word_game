@@ -1,8 +1,420 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>운영자</title><link rel="stylesheet" href="/style.css"></head><body><main class="wrap">
-<section class="card"><h1>👑 운영자 콘솔</h1><div id="login" class="row"><input id="key" type="password" placeholder="운영자 키"><button id="loginBtn" class="btn">접속</button></div><div id="notice"></div></section>
-<section id="console" class="hidden"><div class="card"><div class="top"><div><div id="phase" class="pill">대기</div><h2 id="question">문제 없음</h2><div id="answer" class="big"></div><div id="hints" class="muted"></div></div><div><b id="counts">0명 / 0명</b></div></div>
-<div class="row" style="margin-top:18px"><button id="start" class="btn">문제 시작</button><button id="next" class="btn alt">다음 문제</button><button id="reveal" class="btn danger">정답 공개</button></div></div>
-<div class="card"><h2>문제 CSV 불러오기</h2><p class="muted">열: 정답, 분류코드, 힌트1~힌트5</p><input id="csv" type="file" accept=".csv"><div class="row" style="margin-top:12px"><button id="upload" class="btn">CSV 적용</button><button id="download" class="btn alt">📥 전체 기록 CSV 다운로드</button></div></div>
-<div class="card"><h2>실시간 정답 순위</h2><div id="winners"></div></div>
-<div class="card"><h2>누적 기록</h2><div id="records" class="muted"></div><button id="reset" class="btn danger" style="margin-top:14px">새 게임으로 기록 초기화</button></div></section>
-<script src="/socket.io/socket.io.js"></script><script src="/admin.js"></script></main></body></html>
+<!doctype html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8">
+
+    <!-- 모바일 / 태블릿에서도 화면 크기에 맞게 표시 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- 브라우저 탭에 표시되는 제목 -->
+    <title>🎮WORD_GAME GM TOOL</title>
+
+    <!-- 전체 디자인 / 색상 / 버튼 / 카드 등을 담당하는 CSS -->
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+
+<body>
+
+    <!-- ================================
+         운영자 화면 전체 영역
+    ================================= -->
+    <main class="wrap">
+
+
+        <!-- ================================
+             1. 운영자 로그인 영역
+
+             운영자 키를 입력해서
+             관리자 화면에 접속하는 부분
+        ================================= -->
+        <section class="card">
+
+            <!-- 운영자 화면 제목 -->
+            <h1>👑 운영자 콘솔</h1>
+
+
+            <!-- 운영자 키 입력 영역 -->
+            <div
+                id="login"
+                class="row"
+            >
+
+                <!--
+                    운영자 키 입력칸
+
+                    실제 운영자 키는
+                    Render의 ADMIN_KEY 환경변수와 비교됨.
+                -->
+                <input
+                    id="key"
+                    type="password"
+                    placeholder="운영자 키"
+                >
+
+                <!-- 운영자 로그인 버튼 -->
+                <button
+                    id="loginBtn"
+                    class="btn"
+                >
+                    접속
+                </button>
+
+            </div>
+
+
+            <!--
+                로그인 실패 / 안내 메시지 표시
+
+                예:
+                운영자 키가 맞지 않습니다.
+                CSV에서 문제를 찾지 못했습니다.
+                20개 문제를 불러왔습니다.
+            -->
+            <div id="notice"></div>
+
+        </section>
+
+
+
+        <!-- ================================
+             2. 운영자 콘솔 전체
+
+             처음에는 hidden 상태.
+
+             운영자 키가 맞으면
+             admin.js에서 hidden을 제거해서
+             이 영역을 보여줌.
+        ================================= -->
+        <section
+            id="console"
+            class="hidden"
+        >
+
+
+            <!-- ================================
+                 3. 현재 문제 / 게임 상태
+            ================================= -->
+            <div class="card">
+
+
+                <div class="top">
+
+
+                    <!-- 현재 문제 정보 -->
+                    <div>
+
+
+                        <!--
+                            현재 게임 상태
+
+                            대기
+                            진행 중
+                            정답 공개
+
+                            admin.js에서 자동 변경됨.
+                        -->
+                        <div
+                            id="phase"
+                            class="pill"
+                        >
+                            대기
+                        </div>
+
+
+                        <!--
+                            현재 문제 번호
+
+                            예:
+                            문제 1 / 20 · 자모
+
+                            문제가 없을 때:
+                            문제 없음
+                        -->
+                        <h2 id="question">
+                            문제 없음
+                        </h2>
+
+
+                        <!--
+                            현재 문제의 정답
+
+                            운영자만 볼 수 있음.
+                            admin.js에서 자동으로 표시됨.
+                        -->
+                        <div
+                            id="answer"
+                            class="big"
+                        ></div>
+
+
+                        <!--
+                            현재 문제에 등록된 힌트
+
+                            힌트1
+                            힌트2
+                            힌트3
+                            ...
+
+                            운영자는 모든 힌트를 볼 수 있음.
+                        -->
+                        <div
+                            id="hints"
+                            class="muted"
+                        ></div>
+
+                    </div>
+
+
+                    <!--
+                        현재 참가자 수 / 정답자 수
+
+                        예:
+                        참가자 20명 · 정답자 7명
+
+                        admin.js에서 실시간으로 변경됨.
+                    -->
+                    <div>
+                        <b id="counts">
+                            0명 / 0명
+                        </b>
+                    </div>
+
+
+                </div>
+
+
+
+                <!-- ================================
+                     4. 게임 진행 버튼
+                ================================= -->
+                <div
+                    class="row"
+                    style="margin-top:18px"
+                >
+
+
+                    <!--
+                        현재 문제 시작
+
+                        누르면 모든 참가자의 게임 화면이
+                        동시에 문제 풀이 상태로 변경됨.
+                    -->
+                    <button
+                        id="start"
+                        class="btn"
+                    >
+                        문제 시작
+                    </button>
+
+
+                    <!--
+                        다음 문제로 이동
+
+                        다음 문제를 선택하고
+                        대기 상태로 전환
+                    -->
+                    <button
+                        id="next"
+                        class="btn alt"
+                    >
+                        다음 문제
+                    </button>
+
+
+                    <!--
+                        현재 문제 정답 공개
+
+                        참가자 / 스크린에
+                        정답 공개 상태를 전달함.
+                    -->
+                    <button
+                        id="reveal"
+                        class="btn danger"
+                    >
+                        정답 공개
+                    </button>
+
+
+                </div>
+
+            </div>
+
+
+
+            <!-- ================================
+                 5. 문제 CSV 관리
+            ================================= -->
+            <div class="card">
+
+
+                <h2>문제 CSV 불러오기</h2>
+
+
+                <!--
+                    CSV에서 사용하는 열 이름 안내
+
+                    이 문구 자체는 자유롭게 수정 가능.
+                -->
+                <p class="muted">
+                    열: 정답, 분류코드, 힌트1~힌트5
+                </p>
+
+
+                <!--
+                    문제 CSV 파일 선택
+
+                    accept=".csv"
+                    → CSV 파일만 선택하도록 안내
+                -->
+                <input
+                    id="csv"
+                    type="file"
+                    accept=".csv"
+                >
+
+
+                <div
+                    class="row"
+                    style="margin-top:12px"
+                >
+
+
+                    <!--
+                        선택한 CSV를 서버에 적용
+
+                        실제 파일 처리 기능은
+                        admin.js + server.js에서 담당
+                    -->
+                    <button
+                        id="upload"
+                        class="btn"
+                    >
+                        CSV 적용
+                    </button>
+
+
+                    <!--
+                        지금까지 누적된 전체 게임 기록을
+                        CSV 파일로 다운로드
+
+                        운영하는 기기가
+                        PC / 태블릿 / 스마트폰이어도 사용 가능
+                    -->
+                    <button
+                        id="download"
+                        class="btn alt"
+                    >
+                        📥 전체 기록 CSV 다운로드
+                    </button>
+
+
+                </div>
+
+            </div>
+
+
+
+            <!-- ================================
+                 6. 현재 문제 실시간 정답 순위
+
+                 참가자가 정답을 맞히면
+                 여기에 순서대로 표시됨.
+
+                 예:
+                 1위 복티
+                 2위 묭
+                 3위 유랑
+
+                 시도 횟수 / 힌트 사용량 /
+                 정답 시간도 admin.js에서 표시
+            ================================= -->
+            <div class="card">
+
+                <h2>실시간 정답 순위</h2>
+
+                <div id="winners"></div>
+
+            </div>
+
+
+
+            <!-- ================================
+                 7. 전체 게임 누적 기록
+            ================================= -->
+            <div class="card">
+
+
+                <h2>누적 기록</h2>
+
+
+                <!--
+                    지금까지 서버에 저장된
+                    참가자 × 문제 기록 개수 표시
+
+                    예:
+                    현재 누적 120개 기록 저장됨
+                -->
+                <div
+                    id="records"
+                    class="muted"
+                ></div>
+
+
+                <!--
+                    ⚠️ 게임 기록 전체 초기화
+
+                    새 정모 / 새 게임을 시작할 때 사용
+
+                    누르면 확인창이 한 번 뜨도록
+                    admin.js에서 처리하고 있음.
+                -->
+                <button
+                    id="reset"
+                    class="btn danger"
+                    style="margin-top:14px"
+                >
+                    새 게임으로 기록 초기화
+                </button>
+
+
+            </div>
+
+
+        </section>
+
+
+
+        <!-- ================================
+             8. Socket.IO
+
+             운영자 ↔ 게임 서버 간
+             실시간 통신을 담당
+        ================================= -->
+        <script src="/socket.io/socket.io.js"></script>
+
+
+        <!-- ================================
+             9. 운영자 화면 기능
+
+             운영자 로그인
+             문제 시작
+             다음 문제
+             정답 공개
+             CSV 문제 업로드
+             결과 CSV 다운로드
+             실시간 순위
+             누적 기록
+             기록 초기화
+
+             등의 실제 동작을 담당
+        ================================= -->
+        <script src="/admin.js"></script>
+
+
+    </main>
+
+</body>
+
+</html>

@@ -145,7 +145,9 @@ function publicState(){
     totalQuestions:questions.length, mode:q?.mode || "자모",
     unitLength:q ? units(q.answer,q.mode).length : 0,
     answerVisible:game.answerVisible, answer:game.answerVisible&&q?q.answer:"",
-    winnerCount:game.winners.length, participantCount:game.participants.size
+    winnerCount:game.winners.length, participantCount: Array.from(game.participants.values())
+    .filter(participant => participant.online === true)
+    .length
   };
 }
 function adminState(){
@@ -205,7 +207,9 @@ async function restore(){
   game.phase=saved.phase||"waiting"; game.questionIndex=Number(saved.questionIndex??-1);
   game.questionId=Number(saved.questionId||0); game.startedAt=saved.startedAt||null;
   game.answerVisible=!!saved.answerVisible; game.winners=Array.isArray(saved.winners)?saved.winners:[];
-  game.participants=new Map(Array.isArray(saved.participants)?saved.participants:[]);
+  for (const participant of game.participants.values()) {
+    participant.online = false;
+}
   game.records=Array.isArray(saved.records)?saved.records:[];
   if(Array.isArray(saved.questions)&&saved.questions.length) questions=saved.questions.map(normalizeQuestion);
 }
