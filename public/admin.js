@@ -1,97 +1,15 @@
-const socket = io();
-
-const loginView = document.getElementById("loginView");
-const controlView = document.getElementById("controlView");
-const adminKeyInput = document.getElementById("adminKeyInput");
-const adminLoginBtn = document.getElementById("adminLoginBtn");
-const adminLoginStatus = document.getElementById("adminLoginStatus");
-
-const participantCount = document.getElementById("participantCount");
-const winnerCount = document.getElementById("winnerCount");
-const questionNumber = document.getElementById("questionNumber");
-const adminAnswer = document.getElementById("adminAnswer");
-const adminHint = document.getElementById("adminHint");
-const adminStatus = document.getElementById("adminStatus");
-const winnerList = document.getElementById("winnerList");
-
-const startBtn = document.getElementById("startBtn");
-const hintBtn = document.getElementById("hintBtn");
-const revealBtn = document.getElementById("revealBtn");
-const nextBtn = document.getElementById("nextBtn");
-
-function login() {
-  const key = adminKeyInput.value;
-  socket.emit("admin:join", { key });
+const socket=io(),$=id=>document.getElementById(id);let key=sessionStorage.getItem("bangpingAdminKey")||"";
+if(key){$("key").value=key;login()}$("loginBtn").onclick=login;
+function login(){key=$("key").value;socket.emit("admin:join",{key})}
+socket.on("admin:error",m=>$("notice").textContent=m);socket.on("admin:notice",m=>$("notice").textContent=m);
+socket.on("admin:state",s=>{sessionStorage.setItem("bangpingAdminKey",key);$("login").classList.add("hidden");$("console").classList.remove("hidden");render(s)});
+$("start").onclick=()=>socket.emit("admin:start");$("next").onclick=()=>socket.emit("admin:next");$("reveal").onclick=()=>socket.emit("admin:reveal");
+$("upload").onclick=()=>{const f=$("csv").files[0];if(!f)return;const r=new FileReader();r.onload=()=>socket.emit("admin:csv",{csv:r.result});r.readAsText(f,"utf-8")};
+$("download").onclick=()=>window.location=`/api/export.csv?key=${encodeURIComponent(key)}`;
+$("reset").onclick=()=>{if(confirm("누적 기록을 모두 초기화할까?"))socket.emit("admin:reset")};
+function render(s){$("phase").textContent=s.phase;$("question").textContent=s.questionNumber>0?`문제 ${s.questionNumber} / ${s.totalQuestions} · ${s.mode}`:"문제 없음";$("answer").textContent=s.answer||"";$("hints").innerHTML=(s.hints||[]).map((h,i)=>`힌트 ${i+1}: ${esc(h)}`).join("<br>");$("counts").textContent=`참가자 ${s.participantCount}명 · 정답자 ${s.winnerCount}명`;
+$("winners").innerHTML=(s.winners||[]).map(w=>`<div class="winner"><b>${w.rank}위</b><b>${esc(w.nickname)}</b><span>${w.attempts}회 · 💡${w.hintsUsed} · ${time(w.elapsedMs)}</span></div>`).join("")||"아직 정답자가 없어.";
+$("records").textContent=`현재 누적 ${s.records?.length||0}개 기록 저장됨`;
 }
-
-adminLoginBtn.addEventListener("click", login);
-adminKeyInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") login();
-});
-
-startBtn.addEventListener("click", () => socket.emit("admin:start"));
-hintBtn.addEventListener("click", () => socket.emit("admin:showHint"));
-revealBtn.addEventListener("click", () => socket.emit("admin:reveal"));
-nextBtn.addEventListener("click", () => socket.emit("admin:next"));
-
-socket.on("admin:error", (message) => {
-  adminLoginStatus.textContent = message;
-  adminLoginStatus.className = "status error";
-});
-
-socket.on("admin:state", (state) => {
-  loginView.classList.add("hidden");
-  controlView.classList.remove("hidden");
-
-  participantCount.textContent = `${state.participantCount}명`;
-  winnerCount.textContent = `${state.winnerCount}명`;
-
-  questionNumber.textContent =
-    state.questionNumber > 0
-      ? `문제 ${state.questionNumber} / ${state.totalQuestions}`
-      : "문제 없음";
-
-  adminAnswer.textContent = state.answer || "-";
-  adminHint.textContent = state.hint || "-";
-
-  const phaseLabel = {
-    waiting: "대기 중",
-    playing: "문제 진행 중",
-    revealed: "정답 공개됨"
-  };
-
-  adminStatus.textContent = phaseLabel[state.phase] || "";
-
-  winnerList.innerHTML = "";
-
-  if (!state.winners.length) {
-    winnerList.innerHTML = '<div class="sub">아직 정답자가 없어.</div>';
-    return;
-  }
-
-  state.winners.forEach((winner) => {
-    const item = document.createElement("div");
-    item.className = "winner";
-
-    const seconds = Number.isFinite(winner.elapsedMs)
-      ? `${Math.floor(winner.elapsedMs / 1000)}초`
-      : "";
-
-    item.innerHTML = `
-      <b>${winner.rank}위</b>
-      <span>${escapeHtml(winner.nickname)}</span>
-      <span class="sub">${winner.attempt}회 · ${seconds}</span>
-    `;
-
-    winnerList.appendChild(item);
-  });
-});
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
+function time(ms){if(ms==null)return"";let s=Math.floor(ms/1000);return `${Math.floor(s/60)}분 ${String(s%60).padStart(2,"0")}초`}
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}

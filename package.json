@@ -1,18 +1,13 @@
 {
   "name": "bangping-word-game",
-  "version": "0.1.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "방핑 정모용 실시간 한글 자모 단어게임 뼈대",
-  "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
-  },
-  "engines": {
-    "node": ">=18"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.21.2",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "pg": "^8.13.1"
   }
 }

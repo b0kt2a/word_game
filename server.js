@@ -2,323 +2,325 @@ const express = require("express");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { Server } = require("socket.io");
+
+let Pool = null;
+try { Pool = require("pg").Pool; } catch (_) {}
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
-
 const PORT = process.env.PORT || 3000;
 const ADMIN_KEY = process.env.ADMIN_KEY || "bangping-admin";
+const DATABASE_URL = process.env.DATABASE_URL || "";
 
 const questionsPath = path.join(__dirname, "data", "questions.json");
-let questions = JSON.parse(fs.readFileSync(questionsPath, "utf8"));
+const localStatePath = path.join(__dirname, "data", "game-state.json");
+
+function normalizeQuestion(q, i) {
+  const hints = Array.isArray(q.hints) ? q.hints :
+    [q.hint, q.hint1, q.hint2, q.hint3, q.hint4, q.hint5].filter(Boolean);
+  return {
+    id: q.id || `q${i + 1}`,
+    answer: String(q.answer || "").trim(),
+    mode: String(q.mode || q["분류코드"] || "자모").trim() === "단어" ? "단어" : "자모",
+    hints: hints.map(v => String(v || "").trim()).filter(Boolean)
+  };
+}
+
+let questions = JSON.parse(fs.readFileSync(questionsPath, "utf8")).map(normalizeQuestion);
 
 const game = {
-  phase: "waiting", // waiting | playing | revealed
+  phase: "waiting",
   questionIndex: -1,
   questionId: 0,
   startedAt: null,
-  hintVisible: false,
   answerVisible: false,
   winners: [],
-  participants: new Map()
+  participants: new Map(), // playerId -> participant
+  sockets: new Map(),      // socketId -> playerId
+  records: []              // cumulative per-question player records
 };
 
-app.use(express.json());
+let pool = null;
+if (DATABASE_URL && Pool) {
+  pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: DATABASE_URL.includes("localhost") ? false : { rejectUnauthorized: false }
+  });
+}
+
+app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-app.get("/admin", (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "admin.html"));
-});
+app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
+app.get("/screen", (_req, res) => res.sendFile(path.join(__dirname, "public", "screen.html")));
+app.get("/health", (_req, res) => res.json({ ok: true, db: !!pool }));
 
-app.get("/screen", (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "screen.html"));
-});
-
-app.get("/health", (_req, res) => {
-  res.json({ ok: true });
+app.get("/api/export.csv", (req, res) => {
+  if (req.query.key !== ADMIN_KEY) return res.status(403).send("Forbidden");
+  const headers = ["닉네임","문제번호","정답","분류코드","정답여부","정답순위","시도횟수","힌트사용수","소요시간초"];
+  const rows = game.records.map(r => [
+    r.nickname, r.questionNumber, r.answer, r.mode, r.correct ? "정답" : "미정답",
+    r.rank || "", r.attempts || 0, r.hintsUsed || 0,
+    r.elapsedMs == null ? "" : Math.floor(r.elapsedMs / 1000)
+  ]);
+  const esc = v => `"${String(v ?? "").replaceAll('"','""')}"`;
+  const csv = "\uFEFF" + [headers, ...rows].map(row => row.map(esc).join(",")).join("\r\n");
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="bangping-results-${Date.now()}.csv"`);
+  res.send(csv);
 });
 
 function decomposeHangul(text) {
-  const CHOSEONG = [
-    "ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ",
-    "ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"
-  ];
-  const JUNGSEONG = [
-    "ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ",
-    "ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"
-  ];
-  const JONGSEONG = [
-    "", "ㄱ","ㄲ","ㄳ","ㄴ","ㄵ","ㄶ","ㄷ","ㄹ","ㄺ","ㄻ","ㄼ",
-    "ㄽ","ㄾ","ㄿ","ㅀ","ㅁ","ㅂ","ㅄ","ㅅ","ㅆ","ㅇ","ㅈ","ㅊ",
-    "ㅋ","ㅌ","ㅍ","ㅎ"
-  ];
-
-  const clean = String(text || "")
-    .trim()
-    .replace(/\s+/g, "")
-    .replace(/[^\u3131-\u318E\uAC00-\uD7A3]/g, "");
-
-  const result = [];
-
-  for (const char of clean) {
-    const code = char.charCodeAt(0);
-
-    if (code >= 0xac00 && code <= 0xd7a3) {
-      const index = code - 0xac00;
-      const cho = Math.floor(index / 588);
-      const jung = Math.floor((index % 588) / 28);
-      const jong = index % 28;
-
-      result.push(CHOSEONG[cho], JUNGSEONG[jung]);
-      if (jong > 0) result.push(JONGSEONG[jong]);
-    } else {
-      result.push(char);
-    }
+  const CHO=["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
+  const JUNG=["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"];
+  const JONG=["","ㄱ","ㄲ","ㄳ","ㄴ","ㄵ","ㄶ","ㄷ","ㄹ","ㄺ","ㄻ","ㄼ","ㄽ","ㄾ","ㄿ","ㅀ","ㅁ","ㅂ","ㅄ","ㅅ","ㅆ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
+  const clean=String(text||"").trim().replace(/\s+/g,"").replace(/[^\u3131-\u318E\uAC00-\uD7A3A-Za-z0-9]/g,"");
+  const out=[];
+  for(const ch of clean){
+    const code=ch.charCodeAt(0);
+    if(code>=0xAC00&&code<=0xD7A3){
+      const idx=code-0xAC00, cho=Math.floor(idx/588), jung=Math.floor((idx%588)/28), jong=idx%28;
+      out.push(CHO[cho],JUNG[jung]); if(jong) out.push(JONG[jong]);
+    } else out.push(ch.toUpperCase());
   }
-
+  return out;
+}
+function syllables(text){
+  return Array.from(String(text||"").trim().replace(/\s+/g,"").replace(/[^\u3131-\u318E\uAC00-\uD7A3A-Za-z0-9]/g,""))
+    .map(x=>x.toUpperCase());
+}
+function units(text, mode){ return mode === "단어" ? syllables(text) : decomposeHangul(text); }
+function evaluateGuess(guess, answer){
+  const result=Array(answer.length).fill("absent"), remaining={};
+  for(let i=0;i<answer.length;i++){
+    if(guess[i]===answer[i]) result[i]="correct";
+    else remaining[answer[i]]=(remaining[answer[i]]||0)+1;
+  }
+  for(let i=0;i<guess.length;i++){
+    if(result[i]==="correct") continue;
+    if((remaining[guess[i]]||0)>0){ result[i]="present"; remaining[guess[i]]--; }
+  }
   return result;
 }
-
-function evaluateGuess(guess, answer) {
-  const result = Array(answer.length).fill("absent");
-  const remaining = {};
-
-  for (let i = 0; i < answer.length; i += 1) {
-    if (guess[i] === answer[i]) {
-      result[i] = "correct";
-    } else {
-      remaining[answer[i]] = (remaining[answer[i]] || 0) + 1;
-    }
+function currentQuestion(){ return questions[game.questionIndex] || null; }
+function getRecord(playerId, questionId=game.questionId){
+  return game.records.find(r=>r.playerId===playerId && r.questionId===questionId);
+}
+function ensureRecord(playerId){
+  const p=game.participants.get(playerId), q=currentQuestion();
+  if(!p||!q||game.questionIndex<0) return null;
+  let r=getRecord(playerId);
+  if(!r){
+    r={playerId,nickname:p.nickname,questionId:game.questionId,questionNumber:game.questionIndex+1,
+       answer:q.answer,mode:q.mode,attempts:0,hintsUsed:0,correct:false,rank:null,elapsedMs:null,guesses:[]};
+    game.records.push(r);
+    persist();
   }
-
-  for (let i = 0; i < guess.length; i += 1) {
-    if (result[i] === "correct") continue;
-    const char = guess[i];
-
-    if ((remaining[char] || 0) > 0) {
-      result[i] = "present";
-      remaining[char] -= 1;
-    }
-  }
-
-  return result;
+  return r;
 }
-
-function currentQuestion() {
-  return questions[game.questionIndex] || null;
-}
-
-function publicState() {
-  const question = currentQuestion();
-
-  return {
-    phase: game.phase,
-    questionId: game.questionId,
-    questionNumber: game.questionIndex + 1,
-    totalQuestions: questions.length,
-    jamoLength: question ? decomposeHangul(question.answer).length : 0,
-    hintVisible: game.hintVisible,
-    hint: game.hintVisible && question ? question.hint : "",
-    answerVisible: game.answerVisible,
-    answer: game.answerVisible && question ? question.answer : "",
-    winnerCount: game.winners.length,
-    participantCount: game.participants.size
-  };
-}
-
-function adminState() {
-  const question = currentQuestion();
-
+function playerState(playerId){
+  const q=currentQuestion(), r=getRecord(playerId);
   return {
     ...publicState(),
-    answer: question ? question.answer : "",
-    hint: question ? question.hint : "",
-    winners: game.winners,
-    questions
+    playerId,
+    mode:q?.mode || "자모",
+    unitLength:q ? units(q.answer,q.mode).length : 0,
+    attempts:r?.attempts || 0,
+    hintsUsed:r?.hintsUsed || 0,
+    hintsTotal:q?.hints.length || 0,
+    revealedHints:q ? q.hints.slice(0,r?.hintsUsed || 0) : [],
+    solved:!!r?.correct,
+    rank:r?.rank || null,
+    elapsedMs:r?.elapsedMs ?? null,
+    guesses:r?.guesses || []
   };
 }
-
-function screenState() {
-  const question = currentQuestion();
-
+function publicState(){
+  const q=currentQuestion();
   return {
-    ...publicState(),
-    winners: game.winners.map(({ nickname, rank, attempt, elapsedMs }) => ({
-      nickname, rank, attempt, elapsedMs
-    })),
-    answer: game.answerVisible && question ? question.answer : ""
+    phase:game.phase, questionId:game.questionId, questionNumber:game.questionIndex+1,
+    totalQuestions:questions.length, mode:q?.mode || "자모",
+    unitLength:q ? units(q.answer,q.mode).length : 0,
+    answerVisible:game.answerVisible, answer:game.answerVisible&&q?q.answer:"",
+    winnerCount:game.winners.length, participantCount:game.participants.size
   };
 }
-
-function broadcastState() {
-  io.emit("game:state", publicState());
-  io.to("admins").emit("admin:state", adminState());
-  io.to("screens").emit("screen:state", screenState());
+function adminState(){
+  const q=currentQuestion();
+  return {...publicState(), answer:q?.answer||"", hints:q?.hints||[], winners:game.winners,
+    records:game.records, questions};
+}
+function screenState(){
+  const q=currentQuestion();
+  return {...publicState(), answer:game.answerVisible&&q?q.answer:"",
+    winners:game.winners.map(w=>({nickname:w.nickname,rank:w.rank,attempts:w.attempts,hintsUsed:w.hintsUsed,elapsedMs:w.elapsedMs}))};
+}
+function broadcastState(){
+  io.emit("game:state",publicState());
+  io.to("admins").emit("admin:state",adminState());
+  io.to("screens").emit("screen:state",screenState());
+  for(const [socketId,playerId] of game.sockets.entries()){
+    io.to(socketId).emit("player:state",playerState(playerId));
+  }
+}
+function serializableState(){
+  return {
+    phase:game.phase,questionIndex:game.questionIndex,questionId:game.questionId,startedAt:game.startedAt,
+    answerVisible:game.answerVisible,winners:game.winners,
+    participants:Array.from(game.participants.entries()),records:game.records,questions
+  };
+}
+async function initDb(){
+  if(!pool) return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS bangping_state (
+    id INTEGER PRIMARY KEY, payload JSONB NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+}
+async function persist(){
+  const payload=serializableState();
+  try { fs.writeFileSync(localStatePath, JSON.stringify(payload,null,2),"utf8"); } catch(_){}
+  if(pool){
+    try{
+      await pool.query(`INSERT INTO bangping_state(id,payload,updated_at) VALUES(1,$1,NOW())
+        ON CONFLICT(id) DO UPDATE SET payload=EXCLUDED.payload,updated_at=NOW()`,[payload]);
+    }catch(e){ console.error("DB save failed:",e.message); }
+  }
+}
+async function restore(){
+  let saved=null;
+  if(pool){
+    try{
+      await initDb();
+      const r=await pool.query("SELECT payload FROM bangping_state WHERE id=1");
+      if(r.rows[0]) saved=r.rows[0].payload;
+    }catch(e){ console.error("DB restore failed:",e.message); }
+  }
+  if(!saved && fs.existsSync(localStatePath)){
+    try{ saved=JSON.parse(fs.readFileSync(localStatePath,"utf8")); }catch(_){}
+  }
+  if(!saved) return;
+  game.phase=saved.phase||"waiting"; game.questionIndex=Number(saved.questionIndex??-1);
+  game.questionId=Number(saved.questionId||0); game.startedAt=saved.startedAt||null;
+  game.answerVisible=!!saved.answerVisible; game.winners=Array.isArray(saved.winners)?saved.winners:[];
+  game.participants=new Map(Array.isArray(saved.participants)?saved.participants:[]);
+  game.records=Array.isArray(saved.records)?saved.records:[];
+  if(Array.isArray(saved.questions)&&saved.questions.length) questions=saved.questions.map(normalizeQuestion);
 }
 
-io.on("connection", (socket) => {
-  socket.emit("game:state", publicState());
+function parseCsv(text){
+  const rows=[]; let row=[],cell="",quoted=false;
+  text=String(text||"").replace(/^\uFEFF/,"");
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(c==='"'){
+      if(quoted&&text[i+1]==='"'){cell+='"';i++;} else quoted=!quoted;
+    }else if(c===","&&!quoted){row.push(cell);cell="";}
+    else if((c==="\n"||c==="\r")&&!quoted){
+      if(c==="\r"&&text[i+1]==="\n") i++;
+      row.push(cell); if(row.some(v=>v.trim()!=="")) rows.push(row); row=[];cell="";
+    }else cell+=c;
+  }
+  row.push(cell); if(row.some(v=>v.trim()!=="")) rows.push(row);
+  if(rows.length<2) return [];
+  const h=rows[0].map(x=>x.trim());
+  const col=(...names)=>names.map(n=>h.indexOf(n)).find(i=>i>=0);
+  const ai=col("정답","answer"), mi=col("분류코드","mode");
+  const his=[1,2,3,4,5].map(n=>col(`힌트${n}`,`hint${n}`));
+  const legacyHint=col("힌트","hint");
+  return rows.slice(1).map((r,i)=>normalizeQuestion({
+    answer:r[ai]||"", mode:r[mi]||"자모",
+    hints:[...(legacyHint>=0?[r[legacyHint]]:[]),...his.filter(x=>x>=0).map(x=>r[x])].filter(Boolean)
+  },i)).filter(q=>q.answer);
+}
 
-  socket.on("screen:join", () => {
-    socket.join("screens");
-    socket.emit("screen:state", screenState());
+io.on("connection",socket=>{
+  socket.emit("game:state",publicState());
+
+  socket.on("screen:join",()=>{socket.join("screens");socket.emit("screen:state",screenState());});
+
+  socket.on("player:join",({nickname,playerId})=>{
+    const name=String(nickname||"").trim().slice(0,20);
+    if(!name) return socket.emit("player:error","닉네임을 입력해줘.");
+    const id=String(playerId||"").trim() || crypto.randomUUID();
+    const existing=game.participants.get(id);
+    game.participants.set(id,{nickname:name,joinedAt:existing?.joinedAt||Date.now(),online:true});
+    game.sockets.set(socket.id,id); socket.data.playerId=id;
+    if(game.phase==="playing") ensureRecord(id);
+    socket.emit("player:joined",{nickname:name,playerId:id});
+    socket.emit("player:state",playerState(id));
+    persist(); broadcastState();
   });
 
-  socket.on("player:join", ({ nickname }) => {
-    const cleanName = String(nickname || "").trim().slice(0, 20);
-    if (!cleanName) {
-      socket.emit("player:error", "닉네임을 입력해줘.");
-      return;
+  socket.on("player:hint",()=>{
+    const id=socket.data.playerId,q=currentQuestion();
+    if(!id||!q||game.phase!=="playing") return;
+    const r=ensureRecord(id); if(!r||r.correct) return;
+    if(r.hintsUsed<q.hints.length){r.hintsUsed++;persist();broadcastState();}
+  });
+
+  socket.on("player:guess",({word})=>{
+    const id=socket.data.playerId,p=game.participants.get(id),q=currentQuestion();
+    if(!p) return socket.emit("player:error","먼저 닉네임으로 참가해줘.");
+    if(game.phase!=="playing"||!q) return socket.emit("player:error","현재 진행 중인 문제가 없어.");
+    const r=ensureRecord(id); if(r.correct) return socket.emit("player:error","이미 이 문제를 맞혔어.");
+    if(r.attempts>=5) return socket.emit("player:error","5번의 도전을 모두 사용했어.");
+
+    const answer=units(q.answer,q.mode),guess=units(word,q.mode);
+    if(guess.length!==answer.length) return socket.emit("guess:result",{ok:false,reason:"length",expectedLength:answer.length,actualLength:guess.length});
+
+    r.attempts++;
+    const result=evaluateGuess(guess,answer), correct=guess.every((x,i)=>x===answer[i]);
+    r.guesses.push({units:guess,result});
+    if(correct){
+      r.correct=true;r.rank=game.winners.length+1;r.elapsedMs=game.startedAt?Date.now()-game.startedAt:null;
+      game.winners.push({playerId:id,nickname:p.nickname,rank:r.rank,attempts:r.attempts,hintsUsed:r.hintsUsed,elapsedMs:r.elapsedMs});
     }
-
-    game.participants.set(socket.id, {
-      nickname: cleanName,
-      joinedAt: Date.now()
-    });
-
-    socket.data.nickname = cleanName;
-    socket.emit("player:joined", { nickname: cleanName });
+    persist();
+    socket.emit("guess:result",{ok:true,correct,units:guess,result,rank:r.rank,elapsedMs:r.elapsedMs,attempt:r.attempts});
     broadcastState();
   });
 
-  socket.on("admin:join", ({ key }) => {
-    if (key !== ADMIN_KEY) {
-      socket.emit("admin:error", "운영자 키가 맞지 않아.");
-      return;
-    }
-
-    socket.join("admins");
-    socket.data.isAdmin = true;
-    socket.emit("admin:state", adminState());
+  socket.on("admin:join",({key})=>{
+    if(key!==ADMIN_KEY) return socket.emit("admin:error","운영자 키가 맞지 않아.");
+    socket.join("admins");socket.data.isAdmin=true;socket.emit("admin:state",adminState());
+  });
+  socket.on("admin:start",()=>{
+    if(!socket.data.isAdmin||!questions.length) return;
+    if(game.questionIndex<0) game.questionIndex=0;
+    game.phase="playing";game.questionId++;game.startedAt=Date.now();game.answerVisible=false;game.winners=[];
+    for(const id of game.participants.keys()) ensureRecord(id);
+    persist();broadcastState();
+  });
+  socket.on("admin:next",()=>{
+    if(!socket.data.isAdmin||!questions.length) return;
+    game.questionIndex=(game.questionIndex+1)%questions.length;game.phase="waiting";game.questionId++;
+    game.startedAt=null;game.answerVisible=false;game.winners=[];persist();broadcastState();
+  });
+  socket.on("admin:reveal",()=>{
+    if(!socket.data.isAdmin) return;
+    game.phase="revealed";game.answerVisible=true;persist();broadcastState();
+  });
+  socket.on("admin:csv",({csv})=>{
+    if(!socket.data.isAdmin) return;
+    const parsed=parseCsv(csv);
+    if(!parsed.length) return socket.emit("admin:error","CSV에서 문제를 찾지 못했어.");
+    questions=parsed;game.questionIndex=-1;game.questionId++;game.phase="waiting";game.startedAt=null;game.answerVisible=false;game.winners=[];
+    fs.writeFileSync(questionsPath,JSON.stringify(questions,null,2),"utf8");
+    persist();broadcastState();socket.emit("admin:notice",`${questions.length}개 문제를 불러왔어.`);
+  });
+  socket.on("admin:reset",()=>{
+    if(!socket.data.isAdmin) return;
+    game.phase="waiting";game.questionIndex=-1;game.questionId++;game.startedAt=null;game.answerVisible=false;game.winners=[];game.records=[];
+    persist();broadcastState();
   });
 
-  socket.on("admin:start", () => {
-    if (!socket.data.isAdmin) return;
-    if (!questions.length) return;
-
-    if (game.questionIndex < 0) game.questionIndex = 0;
-
-    game.phase = "playing";
-    game.questionId += 1;
-    game.startedAt = Date.now();
-    game.hintVisible = false;
-    game.answerVisible = false;
-    game.winners = [];
-
-    broadcastState();
-  });
-
-  socket.on("admin:next", () => {
-    if (!socket.data.isAdmin) return;
-    if (!questions.length) return;
-
-    game.questionIndex = (game.questionIndex + 1) % questions.length;
-    game.phase = "waiting";
-    game.questionId += 1;
-    game.startedAt = null;
-    game.hintVisible = false;
-    game.answerVisible = false;
-    game.winners = [];
-
-    broadcastState();
-  });
-
-  socket.on("admin:showHint", () => {
-    if (!socket.data.isAdmin) return;
-    game.hintVisible = true;
-    broadcastState();
-  });
-
-  socket.on("admin:reveal", () => {
-    if (!socket.data.isAdmin) return;
-    game.phase = "revealed";
-    game.answerVisible = true;
-    broadcastState();
-  });
-
-  socket.on("player:guess", ({ word, attempt }) => {
-    const participant = game.participants.get(socket.id);
-    const question = currentQuestion();
-
-    if (!participant) {
-      socket.emit("player:error", "먼저 닉네임으로 참가해줘.");
-      return;
-    }
-
-    if (game.phase !== "playing" || !question) {
-      socket.emit("player:error", "현재 진행 중인 문제가 없어.");
-      return;
-    }
-
-    const alreadyWon = game.winners.some(
-      (winner) => winner.socketId === socket.id && winner.questionId === game.questionId
-    );
-
-    if (alreadyWon) {
-      socket.emit("player:error", "이미 이 문제를 맞혔어.");
-      return;
-    }
-
-    const answerJamo = decomposeHangul(question.answer);
-    const guessJamo = decomposeHangul(word);
-
-    if (guessJamo.length !== answerJamo.length) {
-      socket.emit("guess:result", {
-        ok: false,
-        reason: "length",
-        expectedLength: answerJamo.length,
-        actualLength: guessJamo.length
-      });
-      return;
-    }
-
-    const result = evaluateGuess(guessJamo, answerJamo);
-    const correct = guessJamo.every((char, index) => char === answerJamo[index]);
-
-    if (!correct) {
-      socket.emit("guess:result", {
-        ok: true,
-        correct: false,
-        jamo: guessJamo,
-        result
-      });
-      return;
-    }
-
-    const rank = game.winners.length + 1;
-    const elapsedMs = game.startedAt ? Date.now() - game.startedAt : null;
-
-    const winner = {
-      socketId: socket.id,
-      questionId: game.questionId,
-      nickname: participant.nickname,
-      rank,
-      attempt: Number(attempt) || 1,
-      elapsedMs
-    };
-
-    game.winners.push(winner);
-
-    socket.emit("guess:result", {
-      ok: true,
-      correct: true,
-      jamo: guessJamo,
-      result,
-      rank,
-      elapsedMs
-    });
-
-    broadcastState();
-  });
-
-  socket.on("disconnect", () => {
-    game.participants.delete(socket.id);
-    broadcastState();
+  socket.on("disconnect",()=>{
+    const id=game.sockets.get(socket.id);game.sockets.delete(socket.id);
+    if(id&&game.participants.has(id)){game.participants.get(id).online=false;persist();broadcastState();}
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`BangPing Word Game running on port ${PORT}`);
-});
+restore().finally(()=>server.listen(PORT,"0.0.0.0",()=>console.log(`BangPing Word Game v3 on ${PORT}`)));

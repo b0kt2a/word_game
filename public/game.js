@@ -1,210 +1,26 @@
-const socket = io();
-
-const MAX_ATTEMPTS = 5;
-let nickname = localStorage.getItem("bangpingNickname") || "";
-let joined = false;
-let currentQuestionId = null;
-let attempts = [];
-let wonQuestionId = null;
-
-const joinView = document.getElementById("joinView");
-const waitingView = document.getElementById("waitingView");
-const gameView = document.getElementById("gameView");
-const winnerView = document.getElementById("winnerView");
-const revealView = document.getElementById("revealView");
-
-const nicknameInput = document.getElementById("nicknameInput");
-const joinBtn = document.getElementById("joinBtn");
-const joinStatus = document.getElementById("joinStatus");
-const waitingMeta = document.getElementById("waitingMeta");
-const questionBadge = document.getElementById("questionBadge");
-const gameMeta = document.getElementById("gameMeta");
-const hintBox = document.getElementById("hintBox");
-const board = document.getElementById("board");
-const guessInput = document.getElementById("guessInput");
-const guessBtn = document.getElementById("guessBtn");
-const gameStatus = document.getElementById("gameStatus");
-const rankText = document.getElementById("rankText");
-const winnerDetail = document.getElementById("winnerDetail");
-const revealedAnswer = document.getElementById("revealedAnswer");
-
-nicknameInput.value = nickname;
-
-function showOnly(view) {
-  [joinView, waitingView, gameView, winnerView, revealView]
-    .forEach((element) => element.classList.add("hidden"));
-  view.classList.remove("hidden");
+const socket=io(),$=id=>document.getElementById(id);let state=null;
+let playerId=localStorage.getItem("bangpingPlayerId")||"", nickname=localStorage.getItem("bangpingNickname")||"";
+if(nickname){$("nickname").value=nickname; join();}
+$("joinBtn").onclick=join;$("submitBtn").onclick=submit;$("hintBtn").onclick=()=>socket.emit("player:hint");
+$("word").addEventListener("keydown",e=>{if(e.key==="Enter")submit()});
+function join(){nickname=$("nickname").value.trim();if(!nickname)return;socket.emit("player:join",{nickname,playerId});}
+socket.on("player:joined",d=>{playerId=d.playerId;nickname=d.nickname;localStorage.setItem("bangpingPlayerId",playerId);localStorage.setItem("bangpingNickname",nickname);$("joinCard").classList.add("hidden");$("gameCard").classList.remove("hidden")});
+socket.on("game:state",s=>{$("people").textContent=`현재 참가자 ${s.participantCount}명`});
+socket.on("player:state",s=>{state=s;render()});socket.on("player:error",m=>$("status").textContent=m);
+socket.on("guess:result",r=>{if(!r.ok){$("status").textContent=`글자 수가 맞지 않아! ${r.expectedLength}칸 필요`;return}$("word").value="";});
+function submit(){if(!state||state.phase!=="playing")return;socket.emit("player:guess",{word:$("word").value});}
+function render(){if(!state)return;$("people").textContent=`현재 참가자 ${state.participantCount}명`;$("mode").textContent=state.mode;
+if(state.questionNumber<=0){$("qTitle").textContent="대기 중";$("meta").textContent="운영자가 문제를 시작하면 자동으로 시작돼";$("board").innerHTML="";return}
+$("qTitle").textContent=`문제 ${state.questionNumber} / ${state.totalQuestions}`;$("meta").textContent=`${state.unitLength}칸 · ${state.attempts}/5회 · 힌트 ${state.hintsUsed}/${state.hintsTotal}`;
+renderBoard();$("hints").innerHTML=state.revealedHints.map((h,i)=>`<div class="hint">💡 힌트 ${i+1}. ${esc(h)}</div>`).join("");
+$("hintBtn").disabled=state.phase!=="playing"||state.solved||state.hintsUsed>=state.hintsTotal;
+$("hintBtn").textContent=state.hintsUsed>=state.hintsTotal?"💡 힌트 모두 사용":`💡 힌트 보기 (${state.hintsUsed}/${state.hintsTotal})`;
+$("word").disabled=state.phase!=="playing"||state.solved||state.attempts>=5;$("submitBtn").disabled=$("word").disabled;
+if(state.solved)$("status").textContent=`정답!! 🎉 ${state.rank}번째 정답자 · ${time(state.elapsedMs)}`;
+else if(state.attempts>=5)$("status").textContent="5번의 도전을 모두 사용했어!";
+else if(state.phase==="revealed")$("status").textContent=`정답: ${state.answer}`;
+else $("status").textContent="";
 }
-
-function join() {
-  const value = nicknameInput.value.trim();
-  if (!value) {
-    joinStatus.textContent = "닉네임을 입력해줘.";
-    joinStatus.className = "status error";
-    return;
-  }
-
-  socket.emit("player:join", { nickname: value });
-}
-
-joinBtn.addEventListener("click", join);
-nicknameInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") join();
-});
-
-guessBtn.addEventListener("click", submitGuess);
-guessInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") submitGuess();
-});
-
-function submitGuess() {
-  if (attempts.length >= MAX_ATTEMPTS) return;
-
-  const word = guessInput.value.trim();
-  if (!word) {
-    gameStatus.textContent = "단어를 입력해줘.";
-    gameStatus.className = "status error";
-    return;
-  }
-
-  socket.emit("player:guess", {
-    word,
-    attempt: attempts.length + 1
-  });
-}
-
-function renderBoard(jamoLength) {
-  board.innerHTML = "";
-
-  for (let rowIndex = 0; rowIndex < MAX_ATTEMPTS; rowIndex += 1) {
-    const row = document.createElement("div");
-    row.className = "guess-row";
-    row.style.gridTemplateColumns = `repeat(${jamoLength}, minmax(40px, 58px))`;
-
-    const attempt = attempts[rowIndex];
-
-    for (let colIndex = 0; colIndex < jamoLength; colIndex += 1) {
-      const tile = document.createElement("div");
-      tile.className = "tile";
-
-      if (attempt) {
-        tile.textContent = attempt.jamo[colIndex] || "";
-        tile.classList.add(attempt.result[colIndex]);
-      }
-
-      row.appendChild(tile);
-    }
-
-    board.appendChild(row);
-  }
-}
-
-function formatRank(rank) {
-  return `${rank}번째`;
-}
-
-function formatTime(ms) {
-  if (!Number.isFinite(ms)) return "";
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}분 ${seconds}초` : `${seconds}초`;
-}
-
-socket.on("player:joined", ({ nickname: joinedName }) => {
-  nickname = joinedName;
-  joined = true;
-  localStorage.setItem("bangpingNickname", nickname);
-  joinStatus.textContent = "";
-  showOnly(waitingView);
-});
-
-socket.on("player:error", (message) => {
-  gameStatus.textContent = message;
-  gameStatus.className = "status error";
-  joinStatus.textContent = message;
-  joinStatus.className = "status error";
-});
-
-socket.on("game:state", (state) => {
-  if (!joined) return;
-
-  waitingMeta.textContent = `현재 참가자 ${state.participantCount}명`;
-
-  if (state.questionId !== currentQuestionId) {
-    currentQuestionId = state.questionId;
-    attempts = [];
-    wonQuestionId = null;
-    guessInput.value = "";
-    gameStatus.textContent = "";
-  }
-
-  if (state.phase === "waiting") {
-    showOnly(waitingView);
-    return;
-  }
-
-  if (wonQuestionId === state.questionId) {
-    showOnly(winnerView);
-    return;
-  }
-
-  if (state.phase === "revealed") {
-    revealedAnswer.textContent = state.answer || "정답 공개";
-    showOnly(revealView);
-    return;
-  }
-
-  questionBadge.textContent = `문제 ${state.questionNumber} / ${state.totalQuestions}`;
-  gameMeta.textContent = `자모 ${state.jamoLength}칸 · ${attempts.length}/${MAX_ATTEMPTS}회`;
-  hintBox.textContent = state.hint || "";
-  hintBox.classList.toggle("hidden", !state.hintVisible);
-  renderBoard(state.jamoLength);
-  showOnly(gameView);
-  guessInput.focus();
-});
-
-socket.on("guess:result", (payload) => {
-  if (!payload.ok) {
-    if (payload.reason === "length") {
-      gameStatus.textContent =
-        `이 문제는 자모 ${payload.expectedLength}칸이야. 입력한 단어는 ${payload.actualLength}칸이야.`;
-      gameStatus.className = "status error";
-    }
-    return;
-  }
-
-  attempts.push({
-    jamo: payload.jamo,
-    result: payload.result
-  });
-
-  guessInput.value = "";
-  gameStatus.textContent = "";
-  renderBoard(payload.jamo.length);
-
-  if (payload.correct) {
-    wonQuestionId = currentQuestionId;
-    rankText.textContent = formatRank(payload.rank);
-    winnerDetail.textContent =
-      `${attempts.length}회 시도 · ${formatTime(payload.elapsedMs)}`;
-    showOnly(winnerView);
-    return;
-  }
-
-  if (attempts.length >= MAX_ATTEMPTS) {
-    gameStatus.textContent = "기회를 모두 사용했어. 정답 공개를 기다려줘.";
-    gameStatus.className = "status error";
-    guessInput.disabled = true;
-    guessBtn.disabled = true;
-  } else {
-    gameMeta.textContent = `남은 기회 ${MAX_ATTEMPTS - attempts.length}번`;
-    guessInput.focus();
-  }
-});
-
-socket.on("connect", () => {
-  if (nickname) {
-    socket.emit("player:join", { nickname });
-  }
-});
+function renderBoard(){const len=state.unitLength;let html="";for(let r=0;r<5;r++){const g=state.guesses[r];html+=`<div class="guess-row" style="grid-template-columns:repeat(${len},minmax(0,1fr))">`;for(let i=0;i<len;i++){html+=`<div class="cell ${g?g.result[i]:""}">${g?esc(g.units[i]||""):""}</div>`}html+="</div>"}$("board").innerHTML=html;}
+function time(ms){if(ms==null)return"";let s=Math.floor(ms/1000);return `${Math.floor(s/60)}분 ${String(s%60).padStart(2,"0")}초`}
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}

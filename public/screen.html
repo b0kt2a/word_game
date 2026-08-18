@@ -1,21 +1,361 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>방핑 단어게임 실시간 화면</title>
-<style>
-:root{--bg:#0f0f12;--panel:#18181d;--panel2:#23232a;--line:#34343d;--text:#f8f7fc;--muted:#aaa8b5;--accent:#b69cff;--gold:#f3d76d;--silver:#d5d5dd;--bronze:#c89568}
-*{box-sizing:border-box} body{margin:0;min-height:100vh;font-family:Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif;background:radial-gradient(circle at 50% 0%,rgba(182,156,255,.18),transparent 35%),var(--bg);color:var(--text);overflow:hidden}.screen{min-height:100vh;padding:4vh 4vw;display:grid;grid-template-rows:auto auto 1fr;gap:2.2vh}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:2vw}.brand{font-size:clamp(18px,2vw,34px);font-weight:900;letter-spacing:.08em;color:#dcd3ff}.status{padding:.7em 1.1em;border-radius:999px;background:#24212d;border:1px solid #3a3447;font-size:clamp(14px,1.4vw,24px);font-weight:800;color:#ded5ff}.hero{text-align:center}.question{margin:0;font-size:clamp(44px,6vw,94px);line-height:1;letter-spacing:-.04em}.sub{margin-top:1.1vh;color:var(--muted);font-size:clamp(18px,1.7vw,30px)}.count{margin-top:1.5vh;font-size:clamp(34px,4vw,66px);font-weight:1000}.count strong{color:var(--accent)}.content{min-height:0;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);gap:2vw}.panel{min-height:0;background:rgba(24,24,29,.96);border:1px solid var(--line);border-radius:28px;padding:2.2vh 2vw;box-shadow:0 18px 50px rgba(0,0,0,.26)}.panel-title{font-size:clamp(22px,2vw,34px);font-weight:900;margin-bottom:1.4vh}.winners{height:calc(100% - 3.5vh);overflow:hidden;display:grid;align-content:start;gap:1vh}.winner{display:grid;grid-template-columns:90px 1fr auto;align-items:center;gap:1vw;padding:1.2vh 1.2vw;border-radius:18px;background:var(--panel2);border:1px solid #33333d;font-size:clamp(18px,1.6vw,28px)}.rank{font-weight:1000;text-align:center;font-size:clamp(22px,1.8vw,34px)}.winner:nth-child(1) .rank{color:var(--gold)}.winner:nth-child(2) .rank{color:var(--silver)}.winner:nth-child(3) .rank{color:var(--bronze)}.name{font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{color:var(--muted);font-size:.82em;white-space:nowrap}.side{display:grid;grid-template-rows:auto 1fr;gap:1.6vh;min-height:0}.statbox{background:var(--panel2);border:1px solid #33333d;border-radius:22px;padding:1.8vh 1.4vw;text-align:center}.statbox .label{color:var(--muted);font-size:clamp(15px,1.3vw,22px)}.statbox .value{margin-top:.3vh;font-size:clamp(34px,4vw,64px);font-weight:1000}.message{display:grid;place-items:center;text-align:center;height:100%;padding:2vh}.message .big{font-size:clamp(34px,4vw,68px);font-weight:1000;line-height:1.15}.answer{margin-top:1.8vh;padding:1.5vh 1.4vw;border-radius:20px;background:#2a2433;color:#e9e1ff;font-size:clamp(32px,4vw,64px);font-weight:1000;line-height:1.2;word-break:keep-all}.hidden{display:none!important}@media(max-aspect-ratio:4/3){.content{grid-template-columns:1fr;grid-template-rows:1fr auto}.side{grid-template-columns:repeat(2,1fr);grid-template-rows:none}}
-</style>
+    <meta charset="utf-8">
+
+    <!-- 빔프로젝터 / PC 화면 크기에 맞게 표시 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- 브라우저 탭 제목 -->
+    <title>실시간 결과</title>
+
+    <!-- 전체 공통 CSS -->
+    <link rel="stylesheet" href="/style.css">
+
+
+    <!-- ==========================================
+         스크린 화면 전용 디자인
+    =========================================== -->
+    <style>
+
+        /* 전체 화면 */
+        body {
+            background: #111116;
+            color: #fff;
+        }
+
+        .wrap {
+            max-width: 1600px;
+        }
+
+        /* 카드 */
+        .card {
+            background: #19191f;
+            border-color: #33313d;
+        }
+
+        /* 보조 글씨 */
+        .muted {
+            color: #aaa;
+        }
+
+        /* 정답자 순위 */
+        .winner {
+            font-size: clamp(20px, 2.2vw, 38px);
+            border-color: #333;
+        }
+
+        /* 상태 표시 */
+        .pill {
+            background: #2b2440;
+            color: #d8c9ff;
+        }
+
+
+        /* ==========================================
+             QR 대기 화면
+        =========================================== */
+
+        #waitingScreen {
+            text-align: center;
+        }
+
+        /* 대기 화면 제목 */
+        .waiting-title {
+            font-size: clamp(42px, 5vw, 80px);
+            margin-top: 30px;
+            margin-bottom: 10px;
+        }
+
+        /* "QR을 스캔해서..." 안내 */
+        .waiting-message {
+            font-size: clamp(22px, 2vw, 34px);
+            margin-top: 15px;
+            color: #ccc;
+        }
+
+        /* QR 전체 영역 */
+        .qr-area {
+            display: flex;
+            justify-content: center;
+            margin: 35px 0 25px;
+        }
+
+        /* QR 흰색 카드 */
+        .qr-box {
+            background: #fff;
+            padding: 22px;
+            border-radius: 22px;
+            display: inline-block;
+        }
+
+        /* QR 아래 주소 */
+        .join-url {
+            font-size: clamp(18px, 1.5vw, 26px);
+            color: #aaa;
+            margin-top: 15px;
+        }
+
+        /* 참가자 숫자 */
+        .waiting-people {
+            margin-top: 35px;
+            font-size: clamp(26px, 3vw, 46px);
+        }
+
+        /* 참가자 숫자 자체 */
+        #waitingPc {
+            font-size: 1.5em;
+            font-weight: 900;
+            color: #fff;
+        }
+
+
+        /* ==========================================
+             실제 게임 화면
+        =========================================== */
+
+        #gameScreen {
+            display: block;
+        }
+
+    </style>
 </head>
+
+
 <body>
-<main class="screen">
-<div class="top"><div class="brand">TEAM. BANG PING · WORD GAME</div><div id="phaseBadge" class="status">대기 중</div></div>
-<section class="hero"><h1 id="questionText" class="question">게임을 준비하고 있어요</h1><div id="questionSub" class="sub">참가자들의 접속을 기다리는 중</div><div class="count">정답자 <strong id="winnerCount">0</strong> / <span id="participantCount">0</span>명</div></section>
-<section class="content">
-<div class="panel"><div class="panel-title">🏆 실시간 정답 순위</div><div id="winnerList" class="winners"></div></div>
-<div class="side"><div class="statbox"><div class="label">현재 참가자</div><div id="participantBig" class="value">0명</div></div><div class="panel"><div id="messageBox" class="message"><div><div id="messageBig" class="big">잠시만 기다려 주세요</div><div id="messageSub" class="sub">운영자가 문제를 시작하면 자동으로 바뀝니다.</div><div id="answerBox" class="answer hidden"></div></div></div></div></div>
-</section></main>
-<script src="/socket.io/socket.io.js"></script><script src="/screen.js"></script>
-</body></html>
+
+    <main class="wrap">
+
+
+        <!-- ==================================================
+             1. 게임 시작 전 QR 대기 화면
+
+             운영자가 문제를 시작하기 전까지 표시됨.
+             문제 시작 → 자동으로 사라짐.
+        =================================================== -->
+        <section
+            id="waitingScreen"
+            class="card"
+        >
+
+            <!-- 상단 팀 이름 -->
+            <h1>
+                TEAM. BANG PING · WORD GAME
+            </h1>
+
+
+            <!-- 메인 안내 -->
+            <div class="waiting-title">
+                게임에 참가해 주세요!
+            </div>
+
+
+            <div class="waiting-message">
+                QR 코드를 스캔하고 닉네임을 입력해 주세요
+            </div>
+
+
+            <!-- ================================
+                 QR CODE
+            ================================= -->
+            <div class="qr-area">
+
+                <div class="qr-box">
+
+                    <!--
+                        QRCode.js가
+                        이 안에 QR을 자동으로 생성함
+                    -->
+                    <div id="qrcode"></div>
+
+                </div>
+
+            </div>
+
+
+            <!-- QR이 안 찍힐 경우 직접 입력할 주소 -->
+            <div class="join-url">
+                word-game-xrte.onrender.com
+            </div>
+
+
+            <!-- ================================
+                 현재 참가자 수
+
+                 참가자가 들어올 때마다
+                 screen.js에서 실시간 변경
+            ================================= -->
+            <div class="waiting-people">
+
+                현재 참가자
+
+                <span id="waitingPc">
+                    0
+                </span>
+
+                명
+
+            </div>
+
+
+            <div
+                class="muted"
+                style="margin-top:20px"
+            >
+                참가자가 모두 들어오면 게임을 시작합니다
+            </div>
+
+        </section>
+
+
+
+        <!-- ==================================================
+             2. 실제 게임 화면
+
+             대기 중에는 숨겨짐.
+             운영자가 문제 시작 → 자동으로 표시됨.
+        =================================================== -->
+        <div
+            id="gameScreen"
+            class="hidden"
+        >
+
+
+            <!-- ==========================================
+                 현재 게임 상태
+            =========================================== -->
+            <section class="card">
+
+                <div class="top">
+
+
+                    <div>
+
+                        <!-- 고정 제목 -->
+                        <h1>
+                            TEAM. BANG PING · WORD GAME
+                        </h1>
+
+
+                        <!-- 현재 문제 -->
+                        <div
+                            id="q"
+                            class="big"
+                        >
+                            게임을 준비하고 있어요
+                        </div>
+
+
+                        <!-- 문제 추가 정보 -->
+                        <div
+                            id="meta"
+                            class="muted"
+                        ></div>
+
+                    </div>
+
+
+                    <!-- 게임 상태 -->
+                    <div
+                        id="phase"
+                        class="pill"
+                    >
+                        대기 중
+                    </div>
+
+                </div>
+
+
+                <!-- 정답자 / 전체 참가자 -->
+                <div
+                    class="big"
+                    style="margin-top:20px"
+                >
+
+                    정답자
+
+                    <span id="wc">
+                        0
+                    </span>
+
+                    /
+
+                    <span id="pc">
+                        0
+                    </span>
+
+                    명
+
+                </div>
+
+            </section>
+
+
+
+            <!-- ==========================================
+                 실시간 정답 순위
+            =========================================== -->
+            <section class="card">
+
+                <h2>
+                    🏆 실시간 정답 순위
+                </h2>
+
+                <div id="winners"></div>
+
+            </section>
+
+
+
+            <!-- ==========================================
+                 정답 공개 영역
+
+                 운영자가 정답 공개를 눌렀을 때만 표시
+            =========================================== -->
+            <section
+                id="answerCard"
+                class="card hidden"
+            >
+
+                <h2>
+                    정답
+                </h2>
+
+                <div
+                    id="answer"
+                    class="big"
+                ></div>
+
+            </section>
+
+
+        </div>
+
+
+
+        <!-- ==========================================
+             Socket.IO
+        =========================================== -->
+        <script src="/socket.io/socket.io.js"></script>
+
+
+        <!-- ==========================================
+             QR 코드 생성 라이브러리
+        =========================================== -->
+        <script
+            src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js">
+        </script>
+
+
+        <!-- ==========================================
+             스크린 기능
+        =========================================== -->
+        <script src="/screen.js"></script>
+
+
+    </main>
+
+</body>
+
+</html>

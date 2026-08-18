@@ -1,71 +1,284 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <title>방핑 단어게임</title>
-  <link rel="stylesheet" href="/style.css">
+    <meta charset="utf-8">
+
+    <!-- 모바일 화면 크기에 맞게 표시 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- 브라우저 탭에 표시되는 제목 -->
+    <title>WORD GAME</title>
+
+    <!-- 전체 디자인 / 색상 / 크기 등을 담당하는 CSS 파일 -->
+    <link rel="stylesheet" href="/style.css">
 </head>
+
 <body>
-  <main class="page">
-    <section class="card">
-      <div class="hero">
-        <span class="badge">TEAM. BANG PING</span>
-        <h1 style="margin-top:14px;">한글 자모 단어게임</h1>
-        <p class="sub">운영자가 문제를 시작하면 자동으로 화면이 바뀌어.</p>
-      </div>
 
-      <section id="joinView" class="stack">
-        <input id="nicknameInput" maxlength="20" placeholder="닉네임을 입력해줘">
-        <button id="joinBtn" class="primary">게임 참가</button>
-        <div id="joinStatus" class="status"></div>
-      </section>
+    <!-- ================================
+         참가자 화면 전체 영역
+    ================================= -->
+    <main class="wrap">
 
-      <section id="waitingView" class="hidden">
-        <div class="hero">
-          <h2>대기 중...</h2>
-          <p class="sub">운영자가 문제를 시작하면 자동으로 넘어가.</p>
-          <div id="waitingMeta" class="status"></div>
-        </div>
-      </section>
 
-      <section id="gameView" class="hidden stack">
-        <div class="hero">
-          <span id="questionBadge" class="badge">문제</span>
-          <h2 id="gameTitle" style="margin-top:14px;">단어를 맞혀봐!</h2>
-          <div id="gameMeta" class="sub"></div>
-        </div>
+        <!-- ================================
+             1. 상단 제목 + 현재 참가자 수
+        ================================= -->
+        <section class="card">
 
-        <div id="hintBox" class="answer-box hidden"></div>
-        <div id="board" class="board"></div>
+            <div class="top">
 
-        <div class="row">
-          <input id="guessInput" placeholder="한글 단어 입력" autocomplete="off">
-          <button id="guessBtn" class="primary">입력</button>
-        </div>
-        <div id="gameStatus" class="status"></div>
-      </section>
+                <!-- 게임 제목 -->
+                <div>
+                    <h1>WORD GAME</h1>
 
-      <section id="winnerView" class="hidden">
-        <div class="hero">
-          <h2>정답!! 🎉</h2>
-          <div id="rankText" class="big-rank"></div>
-          <p id="winnerDetail" class="sub"></p>
-          <p class="sub">다음 문제를 기다려줘.</p>
-        </div>
-      </section>
+                    <!-- 제목 아래 작은 설명 -->
+                    <div class="muted">
+                        방핑 개인전
+                    </div>
+                </div>
 
-      <section id="revealView" class="hidden">
-        <div class="hero">
-          <h2>정답 공개</h2>
-          <div id="revealedAnswer" class="answer-box"></div>
-          <p class="sub" style="margin-top:14px;">다음 문제를 기다려줘.</p>
-        </div>
-      </section>
-    </section>
-  </main>
+                <!--
+                    현재 접속한 참가자 수
+                    game.js에서 숫자가 실시간으로 변경됨
+                -->
+                <div id="people" class="pill">
+                    현재 참가자 0명
+                </div>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="/game.js"></script>
+            </div>
+
+        </section>
+
+
+        <!-- ================================
+             2. 처음 접속했을 때
+                닉네임 입력 화면
+        ================================= -->
+        <section id="joinCard" class="card">
+
+            <!-- 닉네임 입력 영역 제목 -->
+            <h2>닉네임으로 입장</h2>
+
+            <div class="row">
+
+                <!--
+                    참가자 닉네임 입력칸
+                    maxlength="20" = 최대 20글자
+                -->
+                <input
+                    id="nickname"
+                    maxlength="20"
+                    placeholder="닉네임"
+                >
+
+                <!-- 참가 버튼 -->
+                <button
+                    id="joinBtn"
+                    class="btn"
+                >
+                    입장
+                </button>
+
+            </div>
+
+        </section>
+
+
+        <!-- ================================
+             3. 실제 게임 화면
+
+             처음에는 hidden 상태.
+             닉네임으로 입장하면 game.js가
+             hidden을 제거해서 화면에 보여줌.
+        ================================= -->
+        <section
+            id="gameCard"
+            class="card hidden"
+        >
+
+
+            <!-- ================================
+                 문제 상단 정보
+            ================================= -->
+            <div class="top">
+
+                <div>
+
+                    <!--
+                        현재 문제 번호
+                        예: 문제 1 / 20
+
+                        처음에는 "대기 중"으로 표시되고
+                        game.js가 자동 변경함.
+                    -->
+                    <h2 id="qTitle">
+                        대기 중
+                    </h2>
+
+                    <!--
+                        문제 정보
+                        예:
+                        7칸 · 2/5회 · 힌트 1/3
+
+                        game.js에서 자동 표시
+                    -->
+                    <div
+                        id="meta"
+                        class="muted"
+                    ></div>
+
+                </div>
+
+
+                <!--
+                    현재 문제 방식
+
+                    자모 문제 → "자모"
+                    단어 문제 → "단어"
+
+                    game.js에서 자동 변경
+                -->
+                <div
+                    id="mode"
+                    class="pill"
+                >
+                    자모
+                </div>
+
+            </div>
+
+
+            <!-- ================================
+                 4. 워들 게임판
+                 
+                 정답 글자 수와 시도 결과에 따라
+                 game.js가 칸을 자동 생성함.
+            ================================= -->
+            <div
+                id="board"
+                class="board"
+            ></div>
+
+
+            <!-- ================================
+                 5. 글자 판정 색상 설명
+            ================================= -->
+            <div class="legend">
+
+                <!-- 정답 + 위치까지 정확 -->
+                <span>
+                    <i class="dot correct"></i>
+                    자리까지 일치
+                </span>
+
+                <!-- 정답에 있지만 위치가 다름 -->
+                <span>
+                    <i class="dot present"></i>
+                    다른 자리에 있음
+                </span>
+
+                <!-- 정답에 없는 글자 -->
+                <span>
+                    <i class="dot absent"></i>
+                    없음
+                </span>
+
+            </div>
+
+
+            <!-- ================================
+                 6. 참가자가 사용한 힌트 표시 영역
+
+                 처음에는 비어 있음.
+                 힌트 버튼을 누르면 game.js가
+                 힌트를 하나씩 여기에 추가함.
+            ================================= -->
+            <div id="hints"></div>
+
+
+            <!-- ================================
+                 7. 힌트 버튼
+
+                 누를 때마다 다음 힌트가 공개됨.
+                 힌트 사용 횟수도 서버에 기록됨.
+            ================================= -->
+            <button
+                id="hintBtn"
+                class="btn alt"
+                style="margin-top:14px"
+            >
+                💡 힌트 보기
+            </button>
+
+
+            <!-- ================================
+                 8. 정답 입력 영역
+            ================================= -->
+            <div
+                class="row"
+                style="margin-top:14px"
+            >
+
+                <!-- 참가자가 정답을 입력하는 칸 -->
+                <input
+                    id="word"
+                    placeholder="정답 입력"
+                >
+
+                <!-- 정답 제출 버튼 -->
+                <button
+                    id="submitBtn"
+                    class="btn"
+                >
+                    제출
+                </button>
+
+            </div>
+
+
+            <!-- ================================
+                 9. 게임 결과 / 안내 문구
+
+                 예:
+                 정답!! 🎉 1번째 정답자
+                 글자 수가 맞지 않아!
+                 5번의 도전을 모두 사용했어!
+
+                 실제 문구는 game.js에서 만들어짐.
+            ================================= -->
+            <div
+                id="status"
+                style="margin-top:12px; font-weight:900"
+            ></div>
+
+        </section>
+
+
+        <!-- ================================
+             Socket.IO
+             
+             참가자 ↔ 서버의 실시간 통신 담당
+        ================================= -->
+        <script src="/socket.io/socket.io.js"></script>
+
+
+        <!-- ================================
+             참가자 화면의 실제 게임 기능
+
+             닉네임 입장
+             문제 표시
+             정답 제출
+             자모/단어 판정
+             힌트
+             새로고침 복구
+             정답 순위 등
+        ================================= -->
+        <script src="/game.js"></script>
+
+
+    </main>
+
 </body>
 </html>
