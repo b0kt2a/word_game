@@ -32,6 +32,10 @@ app.get("/admin", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "admin.html"));
 });
 
+app.get("/screen", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "screen.html"));
+});
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
@@ -136,13 +140,31 @@ function adminState() {
   };
 }
 
+function screenState() {
+  const question = currentQuestion();
+
+  return {
+    ...publicState(),
+    winners: game.winners.map(({ nickname, rank, attempt, elapsedMs }) => ({
+      nickname, rank, attempt, elapsedMs
+    })),
+    answer: game.answerVisible && question ? question.answer : ""
+  };
+}
+
 function broadcastState() {
   io.emit("game:state", publicState());
   io.to("admins").emit("admin:state", adminState());
+  io.to("screens").emit("screen:state", screenState());
 }
 
 io.on("connection", (socket) => {
   socket.emit("game:state", publicState());
+
+  socket.on("screen:join", () => {
+    socket.join("screens");
+    socket.emit("screen:state", screenState());
+  });
 
   socket.on("player:join", ({ nickname }) => {
     const cleanName = String(nickname || "").trim().slice(0, 20);
