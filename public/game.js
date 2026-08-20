@@ -1,764 +1,262 @@
-/* ==========================================
-   Socket.IO 연결
-========================================== */
-
 const socket = io();
-
-
-/* ==========================================
-   DOM 요소를 쉽게 가져오기 위한 함수
-
-   $("nickname")
-   ↓
-   document.getElementById("nickname")
-========================================== */
-
 const $ = id => document.getElementById(id);
 
-
-/* ==========================================
-   현재 참가자 게임 상태
-
-   서버에서 player:state를 받을 때마다
-   최신 상태가 여기에 저장됨
-========================================== */
-
 let state = null;
+let draft = "";
+let lastQuestionId = null;
+let playerId = localStorage.getItem("bangpingPlayerId") || "";
+let nickname = localStorage.getItem("bangpingNickname") || "";
+let toastTimer = null;
 
+if (nickname) $("nickname").value = nickname;
 
-/* ==========================================
-   참가자 고유 ID + 닉네임
-
-   localStorage에 저장하기 때문에
-   새로고침 / 뒤로가기 / 재접속 후에도
-   같은 참가자로 인식할 수 있음
-========================================== */
-
-let playerId =
-    localStorage.getItem("bangpingPlayerId") || "";
-
-let nickname =
-    localStorage.getItem("bangpingNickname") || "";
-
-
-
-/* ==========================================
-   이전에 저장된 닉네임이 있으면
-   자동으로 재접속 시도
-========================================== */
-
-if (nickname) {
-
-    $("nickname").value = nickname;
-
-    join();
-
-}
-
-
-
-/* ==========================================
-   버튼 이벤트
-========================================== */
-
-
-/* 참가 버튼 */
 $("joinBtn").onclick = join;
-
-
-/* 정답 제출 버튼 */
 $("submitBtn").onclick = submit;
-
-
-/* 힌트 버튼 */
 $("hintBtn").onclick = () => {
-
-    socket.emit("player:hint");
-
+  if (state?.phase === "playing" && !state?.solved) socket.emit("player:hint");
 };
 
+$("board").addEventListener("click", focusWordInput);
+$("board").addEventListener("keydown", event => {
+  if (event.key === "Enter") focusWordInput();
+});
 
+// 키보드 입력 내용을 현재 활성 줄에 실시간 표시
+$("word").addEventListener("input", event => {
+  draft = event.target.value;
+  renderBoard();
+});
 
-/* ==========================================
-   정답 입력칸에서 Enter 키를 누르면 제출
-========================================== */
+// 모바일 키보드의 완료/Enter로도 제출
+$("word").addEventListener("keydown", event => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    submit();
+  }
+});
 
-$("word").addEventListener(
-    "keydown",
-    event => {
-
-        if (event.key === "Enter") {
-
-            submit();
-
-        }
-
-    }
-);
-
-
-
-/* ==========================================
-   참가자 입장
-========================================== */
+// 화면 OFF/ON, 네트워크 전환 등으로 소켓이 재연결되면 기존 참가자로 자동 복구
+socket.on("connect", () => {
+  if (nickname) socket.emit("player:join", { nickname, playerId });
+});
 
 function join() {
-
-    /* 입력한 닉네임 */
-    nickname =
-        $("nickname").value.trim();
-
-
-    /* 닉네임이 없으면 입장하지 않음 */
-    if (!nickname) {
-        return;
-    }
-
-
-    /*
-        서버로 참가 요청
-
-        playerId가 이미 있으면
-        기존 참가자로 복구
-
-        playerId가 없으면
-        서버에서 새 참가자 ID 생성
-    */
-    socket.emit(
-        "player:join",
-        {
-            nickname,
-            playerId
-        }
-    );
-
+  nickname = $("nickname").value.trim();
+  if (!nickname) {
+    showToast("닉네임을 입력해줘!", "error");
+    return;
+  }
+  socket.emit("player:join", { nickname, playerId });
 }
 
+socket.on("player:joined", data => {
+  playerId = data.playerId;
+  nickname = data.nickname;
+  localStorage.setItem("bangpingPlayerId", playerId);
+  localStorage.setItem("bangpingNickname", nickname);
+  $("joinCard").classList.add("hidden");
+  $("gameCard").classList.remove("hidden");
+});
 
+socket.on("game:state", serverState => {
+  $("people").textContent = `${serverState.participantCount}명 접속`;
+});
 
-/* ==========================================
-   서버에서 참가 성공 응답
-========================================== */
+socket.on("player:state", serverState => {
+  // 새 문제로 넘어가면 이전 문제에서 타이핑 중이던 글자는 제거
+  if (lastQuestionId !== null && lastQuestionId !== serverState.questionId) clearDraft();
+  lastQuestionId = serverState.questionId;
+  state = serverState;
+  render();
+});
 
-socket.on(
-    "player:joined",
-    data => {
+socket.on("player:error", message => showToast(message, "error"));
 
-
-        /* 서버에서 받은 참가자 ID */
-        playerId =
-            data.playerId;
-
-
-        /* 서버에서 받은 닉네임 */
-        nickname =
-            data.nickname;
-
-
-        /*
-            브라우저에 참가자 정보 저장
-
-            새로고침해도 유지됨
-        */
-        localStorage.setItem(
-            "bangpingPlayerId",
-            playerId
-        );
-
-        localStorage.setItem(
-            "bangpingNickname",
-            nickname
-        );
-
-
-        /* 닉네임 입력 화면 숨김 */
-        $("joinCard").classList.add("hidden");
-
-
-        /* 실제 게임 화면 표시 */
-        $("gameCard").classList.remove("hidden");
-
-    }
-);
-
-
-
-/* ==========================================
-   전체 게임 상태 수신
-
-   현재 참가자 수 등
-   모든 참가자에게 공통으로 필요한 정보
-========================================== */
-
-socket.on(
-    "game:state",
-    serverState => {
-
-        $("people").textContent =
-            `현재 참가자 ${serverState.participantCount}명`;
-
-    }
-);
-
-
-
-/* ==========================================
-   내 개인 게임 상태 수신
-
-   시도 횟수
-   힌트 사용 수
-   정답 여부
-   정답 순위
-   이전 제출 기록
-   등
-
-   참가자마다 서로 다른 정보가 들어옴
-========================================== */
-
-socket.on(
-    "player:state",
-    serverState => {
-
-        /* 현재 상태 저장 */
-        state = serverState;
-
-
-        /* 참가자 화면 다시 그리기 */
-        render();
-
-    }
-);
-
-
-
-/* ==========================================
-   참가자 오류 메시지
-
-   예:
-   현재 진행 중인 문제가 없어.
-   이미 이 문제를 맞혔어.
-   5번의 도전을 모두 사용했어.
-========================================== */
-
-socket.on(
-    "player:error",
-    message => {
-
-        $("status").textContent =
-            message;
-
-    }
-);
-
-
-
-/* ==========================================
-   정답 제출 결과 수신
-========================================== */
-
-socket.on(
-    "guess:result",
-    result => {
-
-
-        /* ======================================
-           글자 수가 맞지 않는 경우
-        ====================================== */
-
-        if (!result.ok) {
-
-            $("status").textContent =
-                `글자 수가 맞지 않아! ${result.expectedLength}칸 필요`;
-
-            return;
-
-        }
-
-
-        /*
-            정상적으로 제출된 경우
-            입력칸 비우기
-
-            판정 결과 자체는 이후 player:state를 받아
-            render()에서 다시 그림
-        */
-        $("word").value = "";
-
-    }
-);
-
-
-
-/* ==========================================
-   정답 제출
-========================================== */
+socket.on("guess:result", result => {
+  if (!result.ok) {
+    showToast(`⚠️ ${result.expectedLength}칸을 입력해야 해!`, "error");
+    shakeActiveRow();
+    return;
+  }
+  clearDraft();
+});
 
 function submit() {
+  if (!state || state.phase !== "playing" || state.solved || state.attempts >= 5) return;
 
+  if (!draft.trim()) {
+    showToast("정답을 입력해줘!", "error");
+    shakeActiveRow();
+    focusWordInput();
+    return;
+  }
 
-    /*
-        게임 상태가 없거나
-        현재 문제 진행 중이 아니면 제출하지 않음
-    */
-    if (
-        !state ||
-        state.phase !== "playing"
-    ) {
-        return;
-    }
-
-
-    /*
-        입력한 단어를 서버로 전달
-
-        자모 / 단어 판정은
-        server.js가 처리
-    */
-    socket.emit(
-        "player:guess",
-        {
-            word: $("word").value
-        }
-    );
-
+  socket.emit("player:guess", { word: draft });
 }
 
+function focusWordInput() {
+  if (!state || state.phase !== "playing" || state.solved || state.attempts >= 5) return;
+  $("word").focus();
+}
 
-
-/* ==========================================
-   참가자 화면 전체 업데이트
-========================================== */
+function clearDraft() {
+  draft = "";
+  $("word").value = "";
+}
 
 function render() {
-
-
-    /* 서버 상태가 아직 없으면 아무것도 안 함 */
-    if (!state) {
-        return;
-    }
-
-
-
-    /* ======================================
-       1. 현재 참가자 수
-    ====================================== */
-
-    $("people").textContent =
-        `현재 참가자 ${state.participantCount}명`;
-
-
-
-    /* ======================================
-       2. 현재 문제 방식
-
-       자모
-       단어
-    ====================================== */
-
-    $("mode").textContent =
-        state.mode;
-
-
-
-    /* ======================================
-       3. 아직 문제가 없는 상태
-
-       게임 최초 대기 상태
-    ====================================== */
-
-    if (state.questionNumber <= 0) {
-
-
-        $("qTitle").textContent =
-            "대기 중...";
-
-
-        $("meta").textContent =
-            "문제가 자동으로 시작되니 잠시 기다려주세요";
-
-
-        /* 게임판 비우기 */
-        $("board").innerHTML =
-            "";
-
-
-        return;
-
-    }
-
-
-
-    /* ======================================
-       4. 현재 문제 번호
-    ====================================== */
-
-    $("qTitle").textContent =
-        `문제 ${state.questionNumber} / ${state.totalQuestions}`;
-
-
-
-    /* ======================================
-       5. 문제 진행 정보
-
-       예:
-       7칸 · 2/5회 · 힌트 1/3
-    ====================================== */
-
-    $("meta").textContent =
-        `${state.unitLength}칸 · ` +
-        `${state.attempts}/5회 · ` +
-        `힌트 ${state.hintsUsed}/${state.hintsTotal}`;
-
-
-
-    /* ======================================
-       6. 워들 게임판 그리기
-    ====================================== */
-
-    renderBoard();
-
-
-
-    /* ======================================
-       7. 지금까지 사용한 힌트 표시
-
-       힌트를 하나도 사용하지 않았으면
-       아무것도 표시되지 않음
-    ====================================== */
-
-    $("hints").innerHTML =
-
-        state.revealedHints
-
-            .map(
-                (hint, index) => `
-
-                    <div class="hint">
-
-                        💡 힌트 ${index + 1}.
-                        ${esc(hint)}
-
-                    </div>
-
-                `
-            )
-
-            .join("");
-
-
-
-    /* ======================================
-       8. 힌트 버튼 활성 / 비활성
-
-       아래 상황에서는 힌트 버튼 사용 불가:
-
-       - 문제 진행 중이 아님
-       - 이미 정답을 맞힘
-       - 모든 힌트를 사용함
-    ====================================== */
-
-    $("hintBtn").disabled =
-
-        state.phase !== "playing" ||
-
-        state.solved ||
-
-        state.hintsUsed >= state.hintsTotal;
-
-
-
-    /* ======================================
-       9. 힌트 버튼 문구
-
-       힌트가 남아 있으면:
-       💡 힌트 보기 (1/3)
-
-       모두 사용했으면:
-       💡 힌트 모두 사용
-    ====================================== */
-
-    $("hintBtn").textContent =
-
-        state.hintsUsed >= state.hintsTotal
-
-            ? "💡 힌트 모두 사용"
-
-            : `💡 힌트 보기 (${state.hintsUsed}/${state.hintsTotal})`;
-
-
-
-    /* ======================================
-       10. 정답 입력 가능 여부
-
-       아래 상황에서는 입력 금지:
-
-       - 문제가 진행 중이 아님
-       - 이미 정답을 맞힘
-       - 5번의 시도를 모두 사용함
-    ====================================== */
-
-    $("word").disabled =
-
-        state.phase !== "playing" ||
-
-        state.solved ||
-
-        state.attempts >= 5;
-
-
-
-    /* 제출 버튼도 입력칸과 동일하게 설정 */
-    $("submitBtn").disabled =
-        $("word").disabled;
-
-
-
-    /* ======================================
-       11. 게임 상태 안내 문구
-    ====================================== */
-
-
-    /* 이미 정답을 맞힌 경우 */
-    if (state.solved) {
-
-        $("status").textContent =
-
-            `정답!! 🎉 ` +
-            `${state.rank}번째 정답자 · ` +
-            `${time(state.elapsedMs)}`;
-
-    }
-
-
-    /* 5번의 시도를 모두 사용한 경우 */
-    else if (state.attempts >= 5) {
-
-        $("status").textContent =
-            "5번의 도전을 모두 사용했습니다!";
-
-    }
-
-
-    /* 운영자가 정답을 공개한 경우 */
-    else if (state.phase === "revealed") {
-
-        $("status").textContent =
-            `정답: ${state.answer}`;
-
-    }
-
-
-    /* 그 외 정상 진행 중 */
-    else {
-
-        $("status").textContent =
-            "";
-
-    }
-
+  if (!state) return;
+
+  $("people").textContent = `${state.participantCount}명 접속`;
+  $("mode").textContent = state.mode;
+
+  if (state.questionNumber <= 0) {
+    $("qTitle").textContent = "대기 중";
+    $("meta").textContent = "게임 시작을 기다려줘";
+    $("board").innerHTML = "";
+    $("hints").innerHTML = "";
+    $("hintBtn").disabled = true;
+    $("submitBtn").disabled = true;
+    $("answerReveal").classList.add("hidden");
+    return;
+  }
+
+  $("qTitle").textContent = `문제 ${state.questionNumber} / ${state.totalQuestions}`;
+  $("meta").textContent = `${state.unitLength}칸 · ${state.attempts}/5회 · 💡 ${state.hintsUsed}/${state.hintsTotal}`;
+
+  renderBoard();
+
+  $("hints").innerHTML = (state.revealedHints || [])
+    .map((hint, index) => `<div class="hint"><b>힌트 ${index + 1}</b> ${escapeHtml(hint)}</div>`)
+    .join("");
+
+  const locked = state.phase !== "playing" || state.solved || state.attempts >= 5;
+  $("word").disabled = locked;
+  $("submitBtn").disabled = locked;
+  $("hintBtn").disabled = state.phase !== "playing" || state.solved || state.hintsUsed >= state.hintsTotal;
+  $("hintBtn").textContent = state.hintsUsed >= state.hintsTotal
+    ? "💡 힌트 모두 사용"
+    : `💡 힌트 보기 (${state.hintsUsed}/${state.hintsTotal})`;
+
+  // 운영자가 정답 공개를 누르면, 풀이 여부와 상관없이 정답 표시 + 입력 잠금
+  if (state.phase === "revealed") {
+    $("revealedAnswer").textContent = state.answer || "";
+    $("answerReveal").classList.remove("hidden");
+    $("status").textContent = state.solved
+      ? `${state.rank}번째 정답 · +${state.score || 0}점`
+      : "이번 문제는 종료됐어";
+    return;
+  }
+
+  $("answerReveal").classList.add("hidden");
+
+  if (state.solved) {
+    $("status").textContent = `🎉 정답! ${state.rank}번째 · +${state.score || 0}점 · ${formatTime(state.elapsedMs)}`;
+  } else if (state.attempts >= 5) {
+    $("status").textContent = "5번의 도전을 모두 사용했어!";
+  } else if (state.phase === "waiting") {
+    $("status").textContent = "다음 문제를 준비 중이야";
+  } else {
+    $("status").textContent = "게임판을 누르고 정답을 입력해줘";
+  }
 }
-
-
-
-/* ==========================================
-   워들 게임판 생성
-========================================== */
 
 function renderBoard() {
+  if (!state || state.unitLength <= 0) {
+    $("board").innerHTML = "";
+    return;
+  }
 
+  const length = state.unitLength;
+  const draftUnits = displayUnits(draft, state.mode);
+  let html = "";
 
-    /*
-        현재 문제의 칸 수
+  for (let rowIndex = 0; rowIndex < 5; rowIndex++) {
+    const guess = state.guesses[rowIndex];
+    const isActive = state.phase === "playing" && !state.solved && state.attempts < 5 && rowIndex === state.attempts;
 
-        자모 모드:
-        자물쇠
-        → ㅈ ㅏ ㅁ ㅜ ㄹ ㅅ ㅚ
-        → 7칸
+    html += `<div class="guess-row ${isActive ? "active-row" : ""}" data-row="${rowIndex}" style="--cols:${length}">`;
 
-        단어 모드:
-        자물쇠
-        → 자 물 쇠
-        → 3칸
-    */
-    const length =
-        state.unitLength;
+    for (let columnIndex = 0; columnIndex < length; columnIndex++) {
+      let value = "";
+      let resultClass = "";
 
+      if (guess) {
+        value = guess.units[columnIndex] || "";
+        resultClass = guess.result[columnIndex] || "";
+      } else if (isActive) {
+        value = draftUnits[columnIndex] || "";
+      }
 
-    /*
-        HTML을 문자열로 만든 후
-        마지막에 한 번에 board에 넣음
-    */
-    let html =
-        "";
-
-
-
-    /* ======================================
-       최대 5번의 시도
-    ====================================== */
-
-    for (
-        let row = 0;
-        row < 5;
-        row++
-    ) {
-
-
-        /*
-            해당 시도 기록
-
-            아직 시도하지 않은 줄이면 undefined
-        */
-        const guess =
-            state.guesses[row];
-
-
-
-        /*
-            문제 글자 수만큼 가로 칸 생성
-        */
-        html += `
-
-            <div
-                class="guess-row"
-                style="
-                    grid-template-columns:
-                    repeat(${length}, minmax(0, 1fr))
-                "
-            >
-
-        `;
-
-
-
-        /* ==================================
-           한 줄 안의 각 글자 칸 생성
-        ================================== */
-
-        for (
-            let column = 0;
-            column < length;
-            column++
-        ) {
-
-
-            html += `
-
-                <div
-                    class="
-                        cell
-                        ${
-                            guess
-                                ? guess.result[column]
-                                : ""
-                        }
-                    "
-                >
-
-                    ${
-                        guess
-                            ? esc(
-                                guess.units[column] || ""
-                            )
-                            : ""
-                    }
-
-                </div>
-
-            `;
-
-        }
-
-
-
-        /* 한 줄 닫기 */
-        html +=
-            "</div>";
-
+      html += `<div class="cell ${resultClass} ${isActive ? "draft-cell" : ""}">${escapeHtml(value)}</div>`;
     }
 
+    html += "</div>";
+  }
 
-
-    /* 완성된 게임판 화면에 표시 */
-    $("board").innerHTML =
-        html;
-
+  $("board").innerHTML = html;
 }
 
+// 서버의 자모/단어 판정과 같은 방식으로 현재 입력을 화면에 표시
+function displayUnits(text, mode) {
+  const clean = String(text || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^\u3131-\u318E\uAC00-\uD7A3A-Za-z0-9]/g, "");
 
+  if (mode === "단어") return Array.from(clean).map(v => v.toUpperCase());
 
-/* ==========================================
-   시간 표시 함수
+  const CHO = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
+  const JUNG = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"];
+  const JONG = ["","ㄱ","ㄲ","ㄳ","ㄴ","ㄵ","ㄶ","ㄷ","ㄹ","ㄺ","ㄻ","ㄼ","ㄽ","ㄾ","ㄿ","ㅀ","ㅁ","ㅂ","ㅄ","ㅅ","ㅆ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
+  const output = [];
 
-   서버에서는 밀리초(ms)로 저장
-
-   예:
-   190000ms
-   ↓
-   3분 10초
-========================================== */
-
-function time(ms) {
-
-
-    /* 시간이 없으면 빈 문자열 */
-    if (ms == null) {
-        return "";
+  for (const character of clean) {
+    const code = character.charCodeAt(0);
+    if (code >= 0xAC00 && code <= 0xD7A3) {
+      const index = code - 0xAC00;
+      const cho = Math.floor(index / 588);
+      const jung = Math.floor((index % 588) / 28);
+      const jong = index % 28;
+      output.push(CHO[cho], JUNG[jung]);
+      if (jong) output.push(JONG[jong]);
+    } else {
+      output.push(character.toUpperCase());
     }
+  }
 
-
-    /* 밀리초 → 초 */
-    const seconds =
-        Math.floor(ms / 1000);
-
-
-    /* 분 */
-    const minutes =
-        Math.floor(seconds / 60);
-
-
-    /* 남은 초 */
-    const remainSeconds =
-        seconds % 60;
-
-
-    return (
-
-        `${minutes}분 ` +
-
-        `${String(remainSeconds).padStart(2, "0")}초`
-
-    );
-
+  return output;
 }
 
+function showToast(message, type = "error") {
+  const toast = $("toast");
+  toast.textContent = message;
+  toast.className = `toast ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.add("hidden"), 2200);
+}
 
+function shakeActiveRow() {
+  const row = document.querySelector(".guess-row.active-row");
+  if (!row) return;
+  row.classList.remove("shake");
+  void row.offsetWidth;
+  row.classList.add("shake");
+  setTimeout(() => row.classList.remove("shake"), 450);
+}
 
-/* ==========================================
-   HTML 특수문자 처리
+function formatTime(ms) {
+  if (ms == null) return "";
+  const seconds = Math.floor(ms / 1000);
+  return `${Math.floor(seconds / 60)}분 ${String(seconds % 60).padStart(2, "0")}초`;
+}
 
-   힌트나 닉네임 등에
-   < > & " ' 같은 문자가 포함되어도
-
-   HTML 코드로 실행되지 않게 안전하게 변환
-========================================== */
-
-function esc(value) {
-
-    return String(value).replace(
-
-        /[&<>"']/g,
-
-        char => ({
-
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&#39;"
-
-        }[char])
-
-    );
-
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[character]));
 }

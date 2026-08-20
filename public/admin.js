@@ -1,515 +1,103 @@
-/* ==========================================
-   Socket.IO 연결
-========================================== */
-
 const socket = io();
-
-
-/* ==========================================
-   DOM 요소를 쉽게 가져오기 위한 함수
-
-   $("key")
-   ↓
-   document.getElementById("key")
-========================================== */
-
 const $ = id => document.getElementById(id);
 
+let key = sessionStorage.getItem("bangpingAdminKey") || "";
+if (key) $("key").value = key;
 
-/* ==========================================
-   운영자 키
-
-   같은 탭에서 새로고침해도
-   다시 입력하지 않도록 sessionStorage에 저장
-
-   브라우저 탭을 완전히 닫으면 사라짐
-========================================== */
-
-let key =
-    sessionStorage.getItem("bangpingAdminKey") || "";
-
-
-
-/* ==========================================
-   저장된 운영자 키가 있으면 자동 로그인
-========================================== */
-
-if (key) {
-
-    $("key").value = key;
-
-    login();
-
-}
-
-
-
-/* ==========================================
-   운영자 로그인 버튼
-========================================== */
+// 휴대폰 화면 OFF/ON, 네트워크 변경 등으로 소켓이 재연결되면 자동 재인증
+socket.on("connect", () => {
+  if (key) socket.emit("admin:join", { key });
+});
 
 $("loginBtn").onclick = login;
 
-
-
-/* ==========================================
-   운영자 로그인 요청
-
-   입력한 운영자 키를 서버로 전송
-
-   실제 비밀번호 확인은
-   server.js의 ADMIN_KEY와 비교해서 처리
-========================================== */
-
 function login() {
-
-    key = $("key").value;
-
-    socket.emit(
-        "admin:join",
-        {
-            key
-        }
-    );
-
+  key = $("key").value;
+  socket.emit("admin:join", { key });
 }
 
+socket.on("admin:error", message => {
+  $("notice").textContent = message;
+});
 
+socket.on("admin:notice", message => {
+  $("notice").textContent = message;
+});
 
-/* ==========================================
-   운영자 오류 메시지
+socket.on("admin:state", state => {
+  sessionStorage.setItem("bangpingAdminKey", key);
+  $("login").classList.add("hidden");
+  $("console").classList.remove("hidden");
+  render(state);
+});
 
-   예:
-   운영자 키가 맞지 않습니다.
-   CSV에서 문제를 찾지 못했습니다.
-========================================== */
-
-socket.on(
-    "admin:error",
-    message => {
-
-        $("notice").textContent = message;
-
-    }
-);
-
-
-
-/* ==========================================
-   운영자 안내 메시지
-
-   예:
-   20개 문제를 불러왔습니다.
-========================================== */
-
-socket.on(
-    "admin:notice",
-    message => {
-
-        $("notice").textContent = message;
-
-    }
-);
-
-
-
-/* ==========================================
-   서버에서 운영자 상태 수신
-
-   참가자 입장
-   정답 발생
-   문제 시작
-   문제 이동
-   정답 공개
-
-   등 게임 상태가 바뀔 때마다 실행됨
-========================================== */
-
-socket.on(
-    "admin:state",
-    state => {
-
-        /* 운영자 키를 현재 탭에 저장 */
-        sessionStorage.setItem(
-            "bangping0912",
-            key
-        );
-
-
-        /* 로그인 화면 숨김 */
-        $("login").classList.add("hidden");
-
-
-        /* 운영자 콘솔 표시 */
-        $("console").classList.remove("hidden");
-
-
-        /* 화면 업데이트 */
-        render(state);
-
-    }
-);
-
-
-
-/* ==========================================
-   문제 시작 버튼
-
-   현재 선택된 문제를 시작
-========================================== */
-
-$("start").onclick = () => {
-
-    socket.emit("admin:start");
-
-};
-
-
-
-/* ==========================================
-   다음 문제 버튼
-
-   현재 문제 다음 문제로 이동
-========================================== */
-
-$("next").onclick = () => {
-
-    socket.emit("admin:next");
-
-};
-
-
-
-/* ==========================================
-   정답 공개 버튼
-========================================== */
-
-$("reveal").onclick = () => {
-
-    socket.emit("admin:reveal");
-
-};
-
-
-
-/* ==========================================
-   문제 CSV 적용 버튼
-========================================== */
+$("start").onclick = () => socket.emit("admin:start");
+$("next").onclick = () => socket.emit("admin:next");
+$("reveal").onclick = () => socket.emit("admin:reveal");
 
 $("upload").onclick = () => {
+  const file = $("csv").files[0];
+  if (!file) {
+    $("notice").textContent = "CSV 파일을 먼저 선택해줘.";
+    return;
+  }
 
-    /* 선택한 CSV 파일 */
-    const file = $("csv").files[0];
-
-
-    /* 파일이 선택되지 않았으면 종료 */
-    if (!file) {
-        return;
-    }
-
-
-    /* 파일 읽기 */
-    const reader =
-        new FileReader();
-
-
-    /* 파일을 모두 읽었을 때 */
-    reader.onload = () => {
-
-        /*
-            CSV 내용을 서버로 전송
-
-            server.js에서
-            정답 / 분류코드 / 힌트 등을 읽어서
-            문제 목록으로 변경
-        */
-        socket.emit(
-            "admin:csv",
-            {
-                csv: reader.result
-            }
-        );
-
-    };
-
-
-    /* UTF-8로 CSV 파일 읽기 */
-    reader.readAsText(
-        file,
-        "utf-8"
-    );
-
+  const reader = new FileReader();
+  reader.onload = () => socket.emit("admin:csv", { csv: reader.result });
+  reader.readAsText(file, "utf-8");
 };
-
-
-
-/* ==========================================
-   전체 기록 CSV 다운로드
-
-   서버의 CSV 다운로드 주소로 이동해서
-   현재 누적 기록을 파일로 다운로드
-========================================== */
 
 $("download").onclick = () => {
-
-    window.location =
-        `/api/export.csv?key=${encodeURIComponent(key)}`;
-
+  window.location = `/api/export.csv?key=${encodeURIComponent(key)}`;
 };
-
-
-
-/* ==========================================
-   새 게임 / 기록 초기화 버튼
-========================================== */
 
 $("reset").onclick = () => {
-
-    /*
-        실수로 누르는 걸 막기 위해
-        확인창을 한 번 띄움
-    */
-    if (
-        confirm(
-            "누적 기록을 모두 초기화할까요?"
-        )
-    ) {
-
-        socket.emit("admin:reset");
-
-    }
-
+  if (confirm("누적 기록을 모두 초기화할까?")) socket.emit("admin:reset");
 };
 
-
-
-/* ==========================================
-   운영자 화면 전체 업데이트
-
-   서버에서 받은 상태값을 이용해서
-   화면 내용을 다시 그림
-========================================== */
-
 function render(state) {
+  $("phase").textContent = state.phase === "playing"
+    ? "문제 진행 중"
+    : state.phase === "revealed"
+      ? "정답 공개"
+      : "대기 중";
 
+  $("question").textContent = state.questionNumber > 0
+    ? `문제 ${state.questionNumber} / ${state.totalQuestions} · ${state.mode}`
+    : "문제 없음";
 
-    /* ======================================
-       1. 현재 게임 상태
+  $("answer").textContent = state.answer || "";
+  $("hints").innerHTML = (state.hints || [])
+    .map((hint, index) => `힌트 ${index + 1}: ${escapeHtml(hint)}`)
+    .join("<br>");
 
-       대기중..
-       게임 진행중..
-       정답 공개
+  $("counts").textContent = `현재 접속 ${state.participantCount}명 · 정답자 ${state.winnerCount}명`;
 
-       현재는 서버 상태값 그대로 표시
-    ====================================== */
+  $("winners").innerHTML = (state.winners || [])
+    .map(winner => `
+      <div class="winner">
+        <b>${winner.rank}위</b>
+        <b>${escapeHtml(winner.nickname)}</b>
+        <span>${winner.attempts}회 · 💡${winner.hintsUsed} · ${formatTime(winner.elapsedMs)} · +${winner.score || 0}점</span>
+      </div>
+    `)
+    .join("") || "아직 정답자가 없어.";
 
-    $("phase").textContent =
-        state.phase;
-
-
-
-    /* ======================================
-       2. 현재 문제 번호 + 문제 방식
-
-       예:
-       문제 3 / 20 · 자모
-
-       문제가 없으면:
-       문제 없음
-    ====================================== */
-
-    $("question").textContent =
-        state.questionNumber > 0
-            ? `문제 ${state.questionNumber} / ${state.totalQuestions} · ${state.mode}`
-            : "문제 없음";
-
-
-
-    /* ======================================
-       3. 현재 문제 정답
-
-       운영자 화면에서는 항상 확인 가능
-    ====================================== */
-
-    $("answer").textContent =
-        state.answer || "";
-
-
-
-    /* ======================================
-       4. 현재 문제 전체 힌트
-
-       힌트1
-       힌트2
-       힌트3
-       ...
-
-       운영자는 참가자가 사용하지 않았어도
-       모든 힌트를 볼 수 있음
-    ====================================== */
-
-    $("hints").innerHTML =
-        (state.hints || [])
-
-            .map(
-                (hint, index) =>
-                    `힌트 ${index + 1}: ${esc(hint)}`
-            )
-
-            .join("<br>");
-
-
-
-    /* ======================================
-       5. 참가자 수 / 현재 정답자 수
-
-       예:
-       참가자 25명 · 정답자 8명
-    ====================================== */
-
-    $("counts").textContent =
-        `참가자 ${state.participantCount}명 · ` +
-        `정답자 ${state.winnerCount}명`;
-
-
-
-    /* ======================================
-       6. 실시간 정답 순위
-
-       예:
-       1위 복티
-       2회 · 💡0 · 0분 24초
-    ====================================== */
-
-    $("winners").innerHTML =
-
-        (state.winners || [])
-
-            .map(
-                winner => `
-
-                    <div class="winner">
-
-                        <!-- 순위 -->
-                        <b>
-                            ${winner.rank}위
-                        </b>
-
-
-                        <!-- 닉네임 -->
-                        <b>
-                            ${esc(winner.nickname)}
-                        </b>
-
-
-                        <!--
-                            시도 횟수
-                            힌트 사용 수
-                            정답 시간
-                        -->
-                        <span>
-                            ${winner.attempts}회
-                            · 💡${winner.hintsUsed}
-                            · ${time(winner.elapsedMs)}
-                        </span>
-
-                    </div>
-
-                `
-            )
-
-            .join("")
-
-        ||
-
-        "아직 정답자가 없습니다.";
-
-
-
-    /* ======================================
-       7. 현재 누적 기록 개수
-
-       참가자 × 문제 기록 수
-
-       예:
-       현재 누적 120개 기록 저장됨
-    ====================================== */
-
-    $("records").textContent =
-        `현재 누적 ${state.records?.length || 0}개 기록 저장됨`;
-
+  $("records").textContent = `현재 누적 ${state.records?.length || 0}개 기록 저장됨`;
 }
 
-
-
-/* ==========================================
-   시간 표시 함수
-
-   서버에서는 시간을 밀리초(ms)로 저장
-
-   예:
-   190000ms
-   ↓
-   3분 10초
-========================================== */
-
-function time(ms) {
-
-    /* 시간이 없는 경우 */
-    if (ms == null) {
-        return "";
-    }
-
-
-    /* 밀리초 → 초 */
-    const seconds =
-        Math.floor(ms / 1000);
-
-
-    /* 분 */
-    const minutes =
-        Math.floor(seconds / 60);
-
-
-    /* 남은 초 */
-    const remainSeconds =
-        seconds % 60;
-
-
-    return (
-        `${minutes}분 ` +
-        `${String(remainSeconds).padStart(2, "0")}초`
-    );
-
+function formatTime(ms) {
+  if (ms == null) return "";
+  const seconds = Math.floor(ms / 1000);
+  return `${Math.floor(seconds / 60)}분 ${String(seconds % 60).padStart(2, "0")}초`;
 }
 
-
-
-/* ==========================================
-   HTML 특수문자 처리
-
-   닉네임이나 힌트 안에
-   < > & " ' 같은 문자가 들어와도
-
-   HTML 코드로 실행되지 않게 안전하게 변환
-========================================== */
-
-function esc(value) {
-
-    return String(value).replace(
-
-        /[&<>"']/g,
-
-        char => ({
-
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&#39;"
-
-        }[char])
-
-    );
-
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[character]));
 }
