@@ -30,12 +30,9 @@
           <h2 id="qTitle">대기 중</h2>
           <div id="meta" class="game-meta"></div>
         </div>
-        <div id="mode" class="mode-pill">자모</div>
       </div>
 
-      <!-- 게임판을 터치하면 모바일 키보드가 열리고, 입력 내용이 현재 줄에 바로 보임 -->
       <div id="board" class="board" role="button" tabindex="0" aria-label="정답 입력"></div>
-
       <div class="legend">
         <span><i class="dot correct"></i>자리일치</span>
         <span><i class="dot present"></i>다른자리</span>
@@ -49,7 +46,6 @@
         <button id="submitBtn" class="btn">입력 완료</button>
       </div>
 
-      <!-- 실제 입력은 필요하지만 화면에는 보이지 않게 둠 -->
       <input
         id="word"
         class="hidden-word-input"
@@ -63,15 +59,20 @@
 
       <div id="status" class="status-line"></div>
 
-      <!-- 운영자 정답 공개 시 모든 플레이어에게 표시 -->
       <div id="answerReveal" class="answer-reveal hidden">
         <div class="answer-label">정답</div>
         <div id="revealedAnswer" class="answer-value"></div>
       </div>
+
+      <button
+        id="changeNicknameBtn"
+        class="btn secondary"
+        type="button"
+        style="margin-top:8px;min-height:36px;font-size:12px;width:100%;"
+      >다른 닉네임으로 입장</button>
     </section>
   </main>
 
-  <!-- 글자 수 오류 등을 눈에 띄게 표시 -->
   <div id="toast" class="toast hidden" role="alert"></div>
 
   <script src="/socket.io/socket.io.js"></script>

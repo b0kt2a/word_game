@@ -37,7 +37,7 @@ function render(state) {
 
   $("q").textContent = state.questionNumber > 0 ? `문제 ${state.questionNumber}` : "다음 문제";
   $("meta").textContent = state.questionNumber > 0
-    ? `${state.totalQuestions}문제 중 ${state.questionNumber}번째 · ${state.mode}`
+    ? `${state.totalQuestions}문제 중 ${state.questionNumber}번째`
     : "";
   $("wc").textContent = state.winnerCount ?? 0;
 

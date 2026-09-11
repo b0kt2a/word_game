@@ -4,13 +4,37 @@ const $ = id => document.getElementById(id);
 let state = null;
 let draft = "";
 let lastQuestionId = null;
+
+const LOGIN_TTL_MS = 6 * 60 * 60 * 1000; // 최초 로그인 후 6시간
 let playerId = localStorage.getItem("bangpingPlayerId") || "";
 let nickname = localStorage.getItem("bangpingNickname") || "";
+let loginAt = Number(localStorage.getItem("bangpingLoginAt") || 0);
 let toastTimer = null;
 
+function clearSavedIdentity() {
+  localStorage.removeItem("bangpingPlayerId");
+  localStorage.removeItem("bangpingNickname");
+  localStorage.removeItem("bangpingLoginAt");
+  playerId = "";
+  nickname = "";
+  loginAt = 0;
+}
+
+function hasValidSavedLogin() {
+  return Boolean(
+    playerId &&
+    nickname &&
+    loginAt &&
+    Date.now() - loginAt < LOGIN_TTL_MS
+  );
+}
+
+// 예전 버전 저장정보처럼 로그인 시간이 없거나 6시간이 지났으면 자동로그인 해제
+if (!hasValidSavedLogin()) clearSavedIdentity();
 if (nickname) $("nickname").value = nickname;
 
 $("joinBtn").onclick = join;
+$("changeNicknameBtn").onclick = changeNickname;
 $("submitBtn").onclick = submit;
 $("hintBtn").onclick = () => {
   if (state?.phase === "playing" && !state?.solved) socket.emit("player:hint");
@@ -35,9 +59,16 @@ $("word").addEventListener("keydown", event => {
   }
 });
 
-// 화면 OFF/ON, 네트워크 전환 등으로 소켓이 재연결되면 기존 참가자로 자동 복구
+// 화면 OFF/ON, 네트워크 전환 등으로 소켓이 재연결되면 6시간 이내에만 자동 복구
 socket.on("connect", () => {
-  if (nickname) socket.emit("player:join", { nickname, playerId });
+  if (hasValidSavedLogin()) {
+    socket.emit("player:join", { nickname, playerId });
+    return;
+  }
+
+  clearSavedIdentity();
+  $("gameCard").classList.add("hidden");
+  $("joinCard").classList.remove("hidden");
 });
 
 function join() {
@@ -49,11 +80,36 @@ function join() {
   socket.emit("player:join", { nickname, playerId });
 }
 
+function changeNickname() {
+  // 현재 소켓을 먼저 끊어 서버의 기존 온라인 접속을 정상 정리한다.
+  socket.disconnect();
+
+  clearSavedIdentity();
+  state = null;
+  lastQuestionId = null;
+  clearDraft();
+
+  $("nickname").value = "";
+  $("gameCard").classList.add("hidden");
+  $("joinCard").classList.remove("hidden");
+
+  // 새 닉네임으로 다시 입장할 수 있도록 깨끗한 연결을 만든다.
+  setTimeout(() => socket.connect(), 50);
+  setTimeout(() => $("nickname").focus(), 80);
+}
+
 socket.on("player:joined", data => {
   playerId = data.playerId;
   nickname = data.nickname;
+
+  // 최초 입장 시각만 기록한다. 재연결할 때마다 6시간이 연장되지는 않는다.
+  if (!loginAt || Date.now() - loginAt >= LOGIN_TTL_MS) {
+    loginAt = Date.now();
+  }
+
   localStorage.setItem("bangpingPlayerId", playerId);
   localStorage.setItem("bangpingNickname", nickname);
+  localStorage.setItem("bangpingLoginAt", String(loginAt));
   $("joinCard").classList.add("hidden");
   $("gameCard").classList.remove("hidden");
 });
@@ -108,7 +164,6 @@ function render() {
   if (!state) return;
 
   $("people").textContent = `${state.participantCount}명 접속`;
-  $("mode").textContent = state.mode;
 
   if (state.questionNumber <= 0) {
     $("qTitle").textContent = "대기 중";
@@ -168,7 +223,7 @@ function renderBoard() {
   }
 
   const length = state.unitLength;
-  const draftUnits = displayUnits(draft, state.mode);
+  const draftUnits = displayUnits(draft);
   let html = "";
 
   for (let rowIndex = 0; rowIndex < 5; rowIndex++) {
@@ -197,14 +252,13 @@ function renderBoard() {
   $("board").innerHTML = html;
 }
 
-// 서버의 자모/단어 판정과 같은 방식으로 현재 입력을 화면에 표시
-function displayUnits(text, mode) {
+// 서버의 자모 분해 방식과 같은 방식으로 현재 입력을 화면에 표시
+function displayUnits(text) {
   const clean = String(text || "")
     .trim()
     .replace(/\s+/g, "")
     .replace(/[^\u3131-\u318E\uAC00-\uD7A3A-Za-z0-9]/g, "");
 
-  if (mode === "단어") return Array.from(clean).map(v => v.toUpperCase());
 
   const CHO = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
   const JUNG = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"];

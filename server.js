@@ -19,24 +19,23 @@ const DATABASE_URL = process.env.DATABASE_URL || "";
 const questionsPath = path.join(__dirname, "data", "questions.json");
 const localStatePath = path.join(__dirname, "data", "game-state.json");
 
-// 점수식은 임시값. 나중에 숫자만 바꾸면 됨.
+// 점수 규칙: 기본 100점 + 정답 순위 보너스 - 힌트 사용 감점
+// 1~10등은 10점부터 1점까지 추가, 힌트 1개당 10점 감점
 const SCORE_RULES = {
   base: 100,
-  rankBonus: { 1: 30, 2: 20, 3: 10 },
-  extraAttemptPenalty: 5,
+  rankBonus: { 1: 10, 2: 9, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 3, 9: 2, 10: 1 },
   hintPenalty: 10
 };
 
 function normalizeQuestion(q, i) {
   const hints = Array.isArray(q.hints)
-    ? q.hints
-    : [q.hint, q.hint1, q.hint2, q.hint3, q.hint4, q.hint5].filter(Boolean);
+    ? q.hints.slice(0, 3)
+    : [q.hint, q.hint1, q.hint2, q.hint3].filter(Boolean);
 
   return {
     id: q.id || `q${i + 1}`,
     answer: String(q.answer || "").trim(),
-    mode: String(q.mode || q["분류코드"] || "자모").trim() === "단어" ? "단어" : "자모",
-    hints: hints.map(v => String(v || "").trim()).filter(Boolean)
+    hints: hints.map(v => String(v || "").trim()).filter(Boolean).slice(0, 3)
   };
 }
 
@@ -76,7 +75,7 @@ app.get("/api/export.csv", (req, res) => {
 
   const totals = calculateTotalScores();
   const headers = [
-    "닉네임", "문제번호", "정답", "분류코드", "정답여부", "정답순위",
+    "닉네임", "문제번호", "정답", "정답여부", "정답순위",
     "시도횟수", "힌트사용수", "소요시간초", "획득점수", "최종누적점수"
   ];
 
@@ -84,7 +83,6 @@ app.get("/api/export.csv", (req, res) => {
     r.nickname,
     r.questionNumber,
     r.answer,
-    r.mode,
     r.correct ? "정답" : "미정답",
     r.rank || "",
     r.attempts || 0,
@@ -125,14 +123,8 @@ function decomposeHangul(text) {
   return out;
 }
 
-function syllables(text) {
-  return Array.from(
-    String(text || "").trim().replace(/\s+/g, "").replace(/[^\u3131-\u318E\uAC00-\uD7A3A-Za-z0-9]/g, "")
-  ).map(x => x.toUpperCase());
-}
-
-function units(text, mode) {
-  return mode === "단어" ? syllables(text) : decomposeHangul(text);
+function units(text) {
+  return decomposeHangul(text);
 }
 
 function evaluateGuess(guess, answer) {
@@ -203,7 +195,6 @@ function ensureRecord(playerId) {
       questionId: game.questionId,
       questionNumber: game.questionIndex + 1,
       answer: q.answer,
-      mode: q.mode,
       attempts: 0,
       hintsUsed: 0,
       correct: false,
@@ -221,9 +212,8 @@ function ensureRecord(playerId) {
 function calculateScore(record) {
   if (!record?.correct) return 0;
   const rankBonus = SCORE_RULES.rankBonus[record.rank] || 0;
-  const attemptPenalty = Math.max(0, record.attempts - 1) * SCORE_RULES.extraAttemptPenalty;
   const hintPenalty = record.hintsUsed * SCORE_RULES.hintPenalty;
-  return Math.max(0, SCORE_RULES.base + rankBonus - attemptPenalty - hintPenalty);
+  return Math.max(0, SCORE_RULES.base + rankBonus - hintPenalty);
 }
 
 function calculateTotalScores() {
@@ -260,8 +250,7 @@ function publicState() {
     questionId: game.questionId,
     questionNumber: game.questionIndex + 1,
     totalQuestions: questions.length,
-    mode: q?.mode || "자모",
-    unitLength: q ? units(q.answer, q.mode).length : 0,
+    unitLength: q ? units(q.answer).length : 0,
     answerVisible: game.answerVisible,
     answer: game.answerVisible && q ? q.answer : "",
     winnerCount: game.winners.length,
@@ -276,8 +265,7 @@ function playerState(playerId) {
   return {
     ...publicState(),
     playerId,
-    mode: q?.mode || "자모",
-    unitLength: q ? units(q.answer, q.mode).length : 0,
+    unitLength: q ? units(q.answer).length : 0,
     attempts: r?.attempts || 0,
     hintsUsed: r?.hintsUsed || 0,
     hintsTotal: q?.hints.length || 0,
@@ -445,13 +433,11 @@ function parseCsv(text) {
   const h = rows[0].map(x => x.trim());
   const col = (...names) => names.map(n => h.indexOf(n)).find(i => i >= 0);
   const ai = col("정답", "answer");
-  const mi = col("분류코드", "mode");
-  const his = [1,2,3,4,5].map(n => col(`힌트${n}`, `hint${n}`));
+  const his = [1,2,3].map(n => col(`힌트${n}`, `hint${n}`));
   const legacyHint = col("힌트", "hint");
 
   return rows.slice(1).map((r, i) => normalizeQuestion({
     answer: r[ai] || "",
-    mode: r[mi] || "자모",
     hints: [
       ...(legacyHint >= 0 ? [r[legacyHint]] : []),
       ...his.filter(x => x >= 0).map(x => r[x])
@@ -526,8 +512,8 @@ io.on("connection", socket => {
     if (r.correct) return socket.emit("player:error", "이미 이 문제를 맞혔어.");
     if (r.attempts >= 5) return socket.emit("player:error", "5번의 도전을 모두 사용했어.");
 
-    const answer = units(q.answer, q.mode);
-    const guess = units(word, q.mode);
+    const answer = units(q.answer);
+    const guess = units(word);
 
     if (guess.length !== answer.length) {
       return socket.emit("guess:result", {

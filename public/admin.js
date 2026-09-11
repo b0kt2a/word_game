@@ -63,7 +63,7 @@ function render(state) {
       : "대기 중";
 
   $("question").textContent = state.questionNumber > 0
-    ? `문제 ${state.questionNumber} / ${state.totalQuestions} · ${state.mode}`
+    ? `문제 ${state.questionNumber} / ${state.totalQuestions}`
     : "문제 없음";
 
   $("answer").textContent = state.answer || "";
