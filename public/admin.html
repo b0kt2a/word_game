@@ -2,7 +2,7 @@
 <section class="card"><h1>👑 운영자 콘솔</h1><div id="login" class="row"><input id="key" type="password" placeholder="운영자 키"><button id="loginBtn" class="btn">접속</button></div><div id="notice"></div></section>
 <section id="console" class="hidden"><div class="card"><div class="top"><div><div id="phase" class="pill">대기</div><h2 id="question">문제 없음</h2><div id="answer" class="big"></div><div id="hints" class="muted"></div></div><div><b id="counts">0명 / 0명</b></div></div>
 <div class="row" style="margin-top:18px"><button id="start" class="btn">문제 시작</button><button id="next" class="btn alt">다음 문제</button><button id="reveal" class="btn danger">정답 공개</button></div></div>
-<div class="card"><h2>문제 CSV 불러오기</h2><p class="muted">열: 정답, 힌트1~힌트3</p><input id="csv" type="file" accept=".csv"><div class="row" style="margin-top:12px"><button id="upload" class="btn">CSV 적용</button><button id="download" class="btn alt">📥 전체 기록 CSV 다운로드</button></div></div>
+<div class="card"><h2>문제 불러오기</h2><p class="muted">GitHub에 함께 올린 word_game.csv의 자모 문제를 서버에서 직접 불러와.</p><div class="row" style="margin-top:12px"><button id="upload" class="btn">서버 CSV 적용</button><button id="download" class="btn alt">📥 전체 기록 CSV 다운로드</button></div></div>
 <div class="card"><h2>실시간 정답 순위</h2><div id="winners"></div></div>
 <div class="card"><h2>누적 기록</h2><div id="records" class="muted"></div><button id="reset" class="btn danger" style="margin-top:14px">새 게임으로 기록 초기화</button></div></section>
 <script src="/socket.io/socket.io.js"></script><script src="/admin.js"></script></main></body></html>

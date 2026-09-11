@@ -17,6 +17,7 @@ const ADMIN_KEY = process.env.ADMIN_KEY || "bangping-admin";
 const DATABASE_URL = process.env.DATABASE_URL || "";
 
 const questionsPath = path.join(__dirname, "data", "questions.json");
+const bundledCsvPath = path.join(__dirname, "word_game.csv");
 const localStatePath = path.join(__dirname, "data", "game-state.json");
 
 // 점수 규칙: 기본 100점 + 정답 순위 보너스 - 힌트 사용 감점
@@ -433,16 +434,35 @@ function parseCsv(text) {
   const h = rows[0].map(x => x.trim());
   const col = (...names) => names.map(n => h.indexOf(n)).find(i => i >= 0);
   const ai = col("정답", "answer");
+  const categoryIndex = col("분류코드", "분류", "mode", "type");
   const his = [1,2,3].map(n => col(`힌트${n}`, `hint${n}`));
   const legacyHint = col("힌트", "hint");
 
-  return rows.slice(1).map((r, i) => normalizeQuestion({
-    answer: r[ai] || "",
-    hints: [
-      ...(legacyHint >= 0 ? [r[legacyHint]] : []),
-      ...his.filter(x => x >= 0).map(x => r[x])
-    ].filter(Boolean)
-  }, i)).filter(q => q.answer);
+  return rows.slice(1)
+    // 자모 전용 게임: 분류코드가 있는 CSV라면 단어 문제는 자동 제외
+    .filter(r => categoryIndex < 0 || !String(r[categoryIndex] || "").trim() || String(r[categoryIndex] || "").trim() === "자모")
+    .map((r, i) => normalizeQuestion({
+      answer: r[ai] || "",
+      hints: [
+        ...(legacyHint >= 0 ? [r[legacyHint]] : []),
+        ...his.filter(x => x >= 0).map(x => r[x])
+      ].filter(Boolean)
+    }, i)).filter(q => q.answer);
+}
+
+function applyQuestions(parsed) {
+  questions = parsed;
+  game.questionIndex = -1;
+  game.questionId++;
+  game.phase = "waiting";
+  game.sessionStarted = false;
+  game.startedAt = null;
+  game.answerVisible = false;
+  game.winners = [];
+
+  fs.writeFileSync(questionsPath, JSON.stringify(questions, null, 2), "utf8");
+  persist();
+  broadcastState();
 }
 
 function selectQuestion(index) {
@@ -611,19 +631,25 @@ io.on("connection", socket => {
     const parsed = parseCsv(csv);
     if (!parsed.length) return socket.emit("admin:error", "CSV에서 문제를 찾지 못했어.");
 
-    questions = parsed;
-    game.questionIndex = -1;
-    game.questionId++;
-    game.phase = "waiting";
-    game.sessionStarted = false;
-    game.startedAt = null;
-    game.answerVisible = false;
-    game.winners = [];
-
-    fs.writeFileSync(questionsPath, JSON.stringify(questions, null, 2), "utf8");
-    persist();
-    broadcastState();
+    applyQuestions(parsed);
     socket.emit("admin:notice", `${questions.length}개 문제를 불러왔어.`);
+  });
+
+  // 행사장 PC에 CSV 파일이 없어도, GitHub에 함께 올린 word_game.csv를 서버에서 직접 적용
+  socket.on("admin:load-bundled-csv", () => {
+    if (!socket.data.isAdmin) return;
+
+    try {
+      const csv = fs.readFileSync(bundledCsvPath, "utf8");
+      const parsed = parseCsv(csv);
+      if (!parsed.length) return socket.emit("admin:error", "서버 CSV에서 자모 문제를 찾지 못했어.");
+
+      applyQuestions(parsed);
+      socket.emit("admin:notice", `서버 CSV에서 ${questions.length}개 자모 문제를 불러왔어.`);
+    } catch (error) {
+      console.error("bundled CSV load failed:", error);
+      socket.emit("admin:error", "서버의 word_game.csv를 읽지 못했어.");
+    }
   });
 
   socket.on("admin:reset", () => {

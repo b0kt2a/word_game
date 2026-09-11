@@ -36,15 +36,7 @@ $("next").onclick = () => socket.emit("admin:next");
 $("reveal").onclick = () => socket.emit("admin:reveal");
 
 $("upload").onclick = () => {
-  const file = $("csv").files[0];
-  if (!file) {
-    $("notice").textContent = "CSV 파일을 먼저 선택해줘.";
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = () => socket.emit("admin:csv", { csv: reader.result });
-  reader.readAsText(file, "utf-8");
+  socket.emit("admin:load-bundled-csv");
 };
 
 $("download").onclick = () => {
