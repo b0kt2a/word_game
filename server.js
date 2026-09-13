@@ -69,7 +69,12 @@ app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
 app.get("/screen", (_req, res) => res.sendFile(path.join(__dirname, "public", "screen.html")));
-app.get("/health", (_req, res) => res.json({ ok: true, db: !!pool }));
+app.get("/health", (_req, res) => res.json({
+  ok: true,
+  db: !!pool,
+  questionCount: questions.length,
+  questionSource: fs.existsSync(bundledCsvPath) ? "word_game.csv" : "questions.json"
+}));
 
 app.get("/api/export.csv", (req, res) => {
   if (req.query.key !== ADMIN_KEY) return res.status(403).send("Forbidden");
@@ -450,6 +455,41 @@ function parseCsv(text) {
     }, i)).filter(q => q.answer);
 }
 
+function loadBundledQuestions() {
+  try {
+    if (!fs.existsSync(bundledCsvPath)) {
+      console.warn("word_game.csv not found; using data/questions.json fallback");
+      return false;
+    }
+
+    const csv = fs.readFileSync(bundledCsvPath, "utf8");
+    const parsed = parseCsv(csv);
+    if (!parsed.length) {
+      console.warn("word_game.csv contained no valid 자모 questions; using fallback question data");
+      return false;
+    }
+
+    // 배포본의 word_game.csv를 문제은행의 기준으로 사용한다.
+    // 브라우저 localStorage나 관리자 PC의 업로드 기록에 의존하지 않는다.
+    questions = parsed;
+
+    // 저장된 진행 상태의 인덱스가 새 문제은행 범위를 벗어났다면 안전하게 대기 상태로 돌린다.
+    if (game.questionIndex >= questions.length) {
+      game.questionIndex = -1;
+      game.phase = "waiting";
+      game.startedAt = null;
+      game.answerVisible = false;
+      game.winners = [];
+    }
+
+    console.log(`Loaded ${questions.length} questions from bundled word_game.csv`);
+    return true;
+  } catch (error) {
+    console.error("Startup CSV load failed:", error.message);
+    return false;
+  }
+}
+
 function applyQuestions(parsed) {
   questions = parsed;
   game.questionIndex = -1;
@@ -674,8 +714,14 @@ io.on("connection", socket => {
   });
 });
 
-restore().finally(() => {
+restore().finally(async () => {
+  // 중요: DB/로컬 상태에 예전 문제 목록이 남아 있어도,
+  // 배포 파일에 포함된 word_game.csv를 항상 최종 문제은행으로 다시 적용한다.
+  // 따라서 새 브라우저/새 노트북/Render 재배포에서도 관리자 업로드 없이 본문제가 보인다.
+  loadBundledQuestions();
+  await persist();
+
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(`BangPing Word Game v4 running on ${PORT}`);
+    console.log(`BangPing Word Game v4 running on ${PORT} (${questions.length} questions)`);
   });
 });
